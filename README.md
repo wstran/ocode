@@ -4,21 +4,13 @@
   <b><code>ocode</code></b> — read and edit code in your terminal, fast.
 </p>
 
+<p align="center">
+  <img src="docs/editor.png" alt="opencode editing a Rust file: file tree, syntax-highlighted code and a status bar" width="820">
+</p>
+
 opencode opens a file or a folder and renders it instantly: syntax-highlighted
 code, a file tree, smooth scrolling, selection and clipboard. The whole screen
 is your code — the only chrome is a single status line at the bottom.
-
-```text
-┌ opencode ─────────┐  1  use std::collections::HashMap;
-│ ▾ src             │  2
-│     buffer.rs     │  3  pub fn greet(name: &str) -> String {
-│   › main.rs       │  4      let mut seen = HashMap::new();
-│     ui.rs         │  5      seen.insert(name, 1);
-│   Cargo.toml      │  6      format!("hello, {name}")
-│   README.md       │  7  }
-└───────────────────┘
- [EDIT] src/main.rs                                       Ln 6, Col 5
-```
 
 ## Features
 
@@ -61,6 +53,10 @@ On first launch a **style picker** appears (live preview, `↑/↓` to choose,
 `Enter` to apply). Your pick is saved to `~/.config/opencode/config`, so every
 later launch goes straight to the editor.
 
+<p align="center">
+  <img src="docs/welcome.png" alt="opencode welcome screen with the logo and key hints" width="660">
+</p>
+
 ## Keybindings
 
 Everything is on **`Ctrl`** (macOS terminals never deliver `Cmd` to an app, so
@@ -70,29 +66,29 @@ that adapts to the OS is the **navigation modifier**, written `nav` below:
 
 ### Commands
 
-| Key                       | Action                                          |
-|---------------------------|-------------------------------------------------|
-| `Ctrl+S`                  | Save (flashes a green ✓ Saved)                  |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste the selection           |
-| `Ctrl+Z` / `Ctrl+Y`       | Undo / redo (`Ctrl+Shift+Z` also redoes)        |
-| `Ctrl+F`                  | Search in the current file                      |
-| `Ctrl+B`                  | File browser: open & focus → back to it → hide  |
-| `Ctrl+Q`                  | Quit (press twice if there are unsaved changes) |
+| Key                            | Action                                          |
+|--------------------------------|-------------------------------------------------|
+| `Ctrl+S`                       | Save (flashes a green ✓ Saved)                  |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste the selection                |
+| `Ctrl+Z` / `Ctrl+Y`            | Undo / redo (`Ctrl+Shift+Z` also redoes)        |
+| `Ctrl+F`                       | Search in the current file                      |
+| `Ctrl+B`                       | File browser: open & focus → back to it → hide  |
+| `Ctrl+Q`                       | Quit (press twice if there are unsaved changes) |
 
 ### Move & select
 
 `Shift` turns any motion into a **selection**; the same motion without `Shift`
 moves the cursor and clears the selection. `nav` makes the step bigger.
 
-| Motion              | Key            | + `Shift` selects |
-|---------------------|----------------|-------------------|
-| Left / right        | `←` / `→`        | by character      |
-| By word             | `nav + ←/→`      | by word           |
-| Up / down           | `↑` / `↓`        | by line           |
-| By block (blank line)| `nav + ↑/↓`     | by block          |
-| Line start / end    | `Ctrl+A` / `Ctrl+E` (or `Home`/`End`) | to line edge |
-| File start / end    | `Ctrl+Home` / `Ctrl+End` | to file edge |
-| Scroll a screen     | `PageUp` / `PageDown` | a screen     |
+| Motion                | Key                | + `Shift` selects |
+|-----------------------|--------------------|-------------------|
+| Left / right          | `←` / `→`            | by character      |
+| By word               | `nav + ←/→`          | by word           |
+| Up / down             | `↑` / `↓`            | by line           |
+| By block (blank line) | `nav + ↑/↓`          | by block          |
+| Line start / end      | `Ctrl+A` / `Ctrl+E` (or `Home`/`End`) | to line edge |
+| File start / end      | `Ctrl+Home` / `Ctrl+End` | to file edge  |
+| Scroll a screen       | `PageUp` / `PageDown` | a screen         |
 
 ### Edit
 

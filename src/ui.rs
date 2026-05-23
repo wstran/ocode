@@ -12,6 +12,7 @@ const STATUS_BG: Color = Color::Rgb(40, 44, 52);
 const GUTTER_FG: Color = Color::Rgb(92, 99, 112);
 const GUTTER_CUR: Color = Color::Rgb(171, 178, 191);
 const SEL_BG: Color = Color::Rgb(55, 62, 76);
+const SEL_HL: Color = Color::Rgb(54, 78, 120);
 const ACCENT: Color = Color::Rgb(97, 175, 239);
 const TEXT_FG: Color = Color::Rgb(171, 178, 191);
 
@@ -377,8 +378,10 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
 
         let mut spans = vec![gutter];
 
+        let sel = buf.selection_for_line(li);
+
         if let Some(cached) = buf.hl.line(li) {
-            spans.extend(slice_spans(cached, buf.scroll_col, text_width));
+            spans.extend(slice_spans(cached, buf.scroll_col, text_width, sel));
         }
 
         lines.push(Line::from(spans));
@@ -487,39 +490,63 @@ fn scroll_into_view(buf: &mut Buffer, height: usize, text_width: usize) {
 
 /// Take the slice of highlighted spans visible in `[start, start + width)`
 /// display columns, expanding tabs to a single space so columns stay aligned
-/// with the cursor (which counts one column per char).
-fn slice_spans(spans: &[(Style, String)], start: usize, width: usize) -> Vec<Span<'static>> {
+/// with the cursor (which counts one column per char). Columns inside `sel`
+/// (line-relative char range) get the selection background.
+fn slice_spans(
+    spans: &[(Style, String)],
+    start: usize,
+    width: usize,
+    sel: Option<(usize, usize)>,
+) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
 
     if width == 0 {
         return out;
     }
 
-    let mut col = 0usize;
-
     let stop = start + width;
 
-    'outer: for (style, text) in spans {
-        let mut chunk = String::new();
+    let mut col = 0usize;
 
+    let mut chunk = String::new();
+
+    let mut chunk_style: Option<Style> = None;
+
+    'outer: for (style, text) in spans {
         for ch in text.chars() {
             if col >= stop {
                 break 'outer;
             }
 
             if col >= start {
+                let selected = sel.is_some_and(|(a, b)| col >= a && col < b);
+
+                let cell_style = if selected { style.bg(SEL_HL) } else { *style };
+
+                if chunk_style != Some(cell_style) {
+                    flush_chunk(&mut out, &mut chunk, chunk_style);
+
+                    chunk_style = Some(cell_style);
+                }
+
                 chunk.push(if ch == '\t' { ' ' } else { ch });
             }
 
             col += 1;
         }
-
-        if !chunk.is_empty() {
-            out.push(Span::styled(chunk, *style));
-        }
     }
 
+    flush_chunk(&mut out, &mut chunk, chunk_style);
+
     out
+}
+
+fn flush_chunk(out: &mut Vec<Span<'static>>, chunk: &mut String, style: Option<Style>) {
+    if let Some(style) = style {
+        if !chunk.is_empty() {
+            out.push(Span::styled(std::mem::take(chunk), style));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -66,6 +66,10 @@ pub struct Buffer {
     last_edit_pos: Option<usize>,
 
     last_insert_char: Option<char>,
+
+    /// Fixed end of the selection (char index); the cursor is the moving end.
+    /// `None` means no active selection.
+    anchor: Option<usize>,
 }
 
 impl Buffer {
@@ -98,7 +102,91 @@ impl Buffer {
             last_edit: None,
             last_edit_pos: None,
             last_insert_char: None,
+            anchor: None,
         })
+    }
+
+    /// Begin or extend a selection (call before a cursor move): anchors at the
+    /// current cursor if there isn't a selection yet, so the moving cursor
+    /// sweeps a range. With `selecting == false` the selection is collapsed.
+    pub fn sel(&mut self, selecting: bool) {
+        if selecting {
+            if self.anchor.is_none() {
+                self.anchor = Some(self.cursor_idx());
+            }
+        } else {
+            self.anchor = None;
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.anchor = None;
+    }
+
+    /// The selected char range `(start, end)` with `start <= end`, or `None`
+    /// when there is no selection (no anchor, or anchor == cursor).
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        let anchor = self.anchor?;
+
+        let cursor = self.cursor_idx();
+
+        if anchor == cursor {
+            None
+        } else {
+            Some((anchor.min(cursor), anchor.max(cursor)))
+        }
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let (start, end) = self.selection()?;
+
+        Some(self.rope.slice(start..end).to_string())
+    }
+
+    /// Delete the active selection (if any). Returns `true` when something was
+    /// removed, leaving the cursor at the start of the former selection.
+    pub fn delete_selection(&mut self) -> bool {
+        let Some((start, end)) = self.selection() else {
+            return false;
+        };
+
+        let line = self.rope.char_to_line(start);
+
+        self.record(EditKind::Other, start, true);
+
+        self.rope.remove(start..end);
+
+        self.anchor = None;
+
+        self.move_to_char(start);
+
+        self.hl.invalidate(line);
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+
+        true
+    }
+
+    /// The selected column range within `line` (char columns), for rendering;
+    /// `None` if the line has no selected cells.
+    pub fn selection_for_line(&self, line: usize) -> Option<(usize, usize)> {
+        let (start, end) = self.selection()?;
+
+        let line_start = self.rope.line_to_char(line);
+
+        let line_end = line_start + self.rope.line(line).len_chars();
+
+        let from = start.max(line_start);
+
+        let to = end.min(line_end);
+
+        if from >= to {
+            None
+        } else {
+            Some((from - line_start, to - line_start))
+        }
     }
 
     /// Recompute `modified` by comparing against the last-saved text. ropey's
@@ -227,6 +315,9 @@ impl Buffer {
     }
 
     pub fn insert_char(&mut self, ch: char) {
+        // Typing over a selection replaces it.
+        self.delete_selection();
+
         let idx = self.cursor_idx();
 
         // Start a new undo step at the beginning of each word so a long burst of
@@ -246,6 +337,32 @@ impl Buffer {
         self.refresh_modified();
 
         self.mark_edit(Some(ch));
+    }
+
+    /// Insert a block of text at the cursor (used by paste), replacing the
+    /// selection first if there is one. The cursor lands after the text.
+    pub fn insert_str(&mut self, text: &str) {
+        self.delete_selection();
+
+        if text.is_empty() {
+            return;
+        }
+
+        let idx = self.cursor_idx();
+
+        let line = self.rope.char_to_line(idx);
+
+        self.record(EditKind::Other, idx, true);
+
+        self.rope.insert(idx, text);
+
+        self.move_to_char(idx + text.chars().count());
+
+        self.hl.invalidate(line);
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
     }
 
     /// Indent the whole current line by one level, regardless of cursor column.
@@ -308,6 +425,8 @@ impl Buffer {
     }
 
     pub fn insert_newline(&mut self) {
+        self.delete_selection();
+
         let idx = self.cursor_idx();
 
         self.record(EditKind::Other, idx, true);
@@ -334,6 +453,10 @@ impl Buffer {
     }
 
     pub fn backspace(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+
         let idx = self.cursor_idx();
 
         if idx == 0 {
@@ -370,6 +493,10 @@ impl Buffer {
     }
 
     pub fn delete(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+
         let idx = self.cursor_idx();
 
         if idx < self.rope.len_chars() {
@@ -504,30 +631,6 @@ impl Buffer {
         }
     }
 
-    pub fn move_word_big_left(&mut self) {
-        let target = self.word_big_left_from(self.cursor_idx());
-
-        self.move_to_char(target);
-    }
-
-    pub fn move_word_big_right(&mut self) {
-        let target = self.word_big_right_from(self.cursor_idx());
-
-        self.move_to_char(target);
-    }
-
-    pub fn move_subtoken_left(&mut self) {
-        let target = self.subtoken_left_from(self.cursor_idx());
-
-        self.move_to_char(target);
-    }
-
-    pub fn move_subtoken_right(&mut self) {
-        let target = self.subtoken_right_from(self.cursor_idx());
-
-        self.move_to_char(target);
-    }
-
     /// Jump to the previous blank line (paragraph / block boundary).
     pub fn move_para_up(&mut self) {
         let mut l = self.cursor_line.saturating_sub(1);
@@ -625,94 +728,6 @@ impl Buffer {
         i
     }
 
-    /// Whitespace-delimited WORD motion (vim `b`): start of the previous token.
-    fn word_big_left_from(&self, from: usize) -> usize {
-        let mut i = from;
-
-        while i > 0 && self.rope.char(i - 1).is_whitespace() {
-            i -= 1;
-        }
-
-        while i > 0 && !self.rope.char(i - 1).is_whitespace() {
-            i -= 1;
-        }
-
-        i
-    }
-
-    /// Whitespace-delimited WORD motion (vim `w`): start of the next token.
-    fn word_big_right_from(&self, from: usize) -> usize {
-        let n = self.rope.len_chars();
-
-        let mut i = from;
-
-        while i < n && !self.rope.char(i).is_whitespace() {
-            i += 1;
-        }
-
-        while i < n && self.rope.char(i).is_whitespace() {
-            i += 1;
-        }
-
-        i
-    }
-
-    /// Fine sub-token motion: stops at punctuation (`.`, `:`, `;`, …), at
-    /// underscores, and at camelCase humps (`getUserName` → get|User|Name).
-    fn subtoken_right_from(&self, from: usize) -> usize {
-        let n = self.rope.len_chars();
-
-        let mut i = from;
-
-        while i < n && self.rope.char(i).is_whitespace() {
-            i += 1;
-        }
-
-        if i >= n {
-            return i;
-        }
-
-        i += 1;
-
-        while i < n {
-            let cur = self.rope.char(i);
-
-            if cur.is_whitespace() || is_subtoken_boundary(self.rope.char(i - 1), cur) {
-                break;
-            }
-
-            i += 1;
-        }
-
-        i
-    }
-
-    fn subtoken_left_from(&self, from: usize) -> usize {
-        let mut i = from;
-
-        while i > 0 && self.rope.char(i - 1).is_whitespace() {
-            i -= 1;
-        }
-
-        if i == 0 {
-            return 0;
-        }
-
-        i -= 1;
-
-        while i > 0 {
-            let prev = self.rope.char(i - 1);
-
-            if prev.is_whitespace() || is_subtoken_boundary(prev, self.rope.char(i)) {
-                break;
-            }
-
-            i -= 1;
-        }
-
-        i
-    }
-
     pub fn file_name(&self) -> String {
         self.path
             .file_name()
@@ -760,33 +775,6 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Whether a sub-token boundary sits between `prev` and `cur` (so `cur` starts a
-/// new sub-token): word↔punctuation, distinct punctuation, underscores,
-/// camelCase humps and letter↔digit transitions.
-fn is_subtoken_boundary(prev: char, cur: char) -> bool {
-    let pw = is_word_char(prev);
-
-    let cw = is_word_char(cur);
-
-    if pw != cw {
-        return true;
-    }
-
-    if !cw {
-        return prev != cur;
-    }
-
-    if prev == '_' || cur == '_' {
-        return true;
-    }
-
-    if prev.is_lowercase() && cur.is_uppercase() {
-        return true;
-    }
-
-    prev.is_ascii_digit() != cur.is_ascii_digit()
-}
-
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
@@ -830,6 +818,7 @@ mod tests {
             last_edit: None,
             last_edit_pos: None,
             last_insert_char: None,
+            anchor: None,
         }
     }
 
@@ -1147,37 +1136,25 @@ mod tests {
     }
 
     #[test]
-    fn subtoken_motion_splits_camel_and_punct() {
-        let mut b = buf("getUserName.id");
+    fn selection_copy_delete_and_replace() {
+        let mut b = buf("hello world");
 
-        b.move_subtoken_right();
+        b.cursor_col = 0;
 
-        assert_eq!(b.cursor_col, 3); // get|
+        b.sel(true);
 
-        b.move_subtoken_right();
+        for _ in 0..5 {
+            b.move_right();
+        }
 
-        assert_eq!(b.cursor_col, 7); // User|
+        assert_eq!(b.selected_text().as_deref(), Some("hello"));
 
-        b.move_subtoken_right();
+        // Typing over the selection replaces it.
+        b.insert_char('H');
 
-        assert_eq!(b.cursor_col, 11); // Name|
+        assert_eq!(b.rope.to_string(), "H world");
 
-        b.move_subtoken_right();
-
-        assert_eq!(b.cursor_col, 12); // .|
-    }
-
-    #[test]
-    fn word_big_motion_is_whitespace_delimited() {
-        let mut b = buf("foo.bar baz");
-
-        b.move_word_big_right();
-
-        assert_eq!(b.cursor_col, 8); // jumps past "foo.bar" to "baz"
-
-        b.move_word_big_left();
-
-        assert_eq!(b.cursor_col, 0);
+        assert!(b.selection().is_none());
     }
 
     #[test]

@@ -54,6 +54,12 @@ pub struct App {
 
     /// Visible editor text rows, updated every render so paging knows the step.
     pub page_rows: usize,
+
+    /// System clipboard handle (`None` if the platform has none); copies also go
+    /// to `clip_internal` so paste still works without a system clipboard.
+    clipboard: Option<arboard::Clipboard>,
+
+    clip_internal: String,
 }
 
 impl App {
@@ -103,6 +109,8 @@ impl App {
             pending_open: None,
             should_quit: false,
             page_rows: 1,
+            clipboard: arboard::Clipboard::new().ok(),
+            clip_internal: String::new(),
         })
     }
 
@@ -115,7 +123,7 @@ impl App {
             return;
         }
 
-        let is_quit_key = ctrl && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('c'));
+        let is_quit_key = ctrl && key.code == KeyCode::Char('q');
 
         if !is_quit_key {
             self.quit_confirm = false;
@@ -129,7 +137,7 @@ impl App {
 
         if ctrl {
             match key.code {
-                KeyCode::Char('q') | KeyCode::Char('c') => return self.request_quit(),
+                KeyCode::Char('q') => return self.request_quit(),
 
                 KeyCode::Char('s') => return self.save(),
 
@@ -137,8 +145,14 @@ impl App {
 
                 KeyCode::Char('f') => return self.open_search(),
 
-                // Other Ctrl combos (Ctrl+arrows, Ctrl+A/E/H) fall through to
-                // the focused pane.
+                KeyCode::Char('c') => return self.copy(),
+
+                KeyCode::Char('x') => return self.cut(),
+
+                KeyCode::Char('v') => return self.paste(),
+
+                // Other Ctrl combos (Ctrl+arrows, Ctrl+A/E/H/Z/Y, …) fall
+                // through to the focused pane.
                 _ => {}
             }
         }
@@ -220,8 +234,6 @@ impl App {
         // rest — so each combo maps to exactly one action (no Ctrl/Alt aliasing).
         let nav = if cfg!(target_os = "macos") { alt } else { ctrl };
 
-        let plain_shift = shift && !ctrl && !alt;
-
         let Some(buf) = self.buffer.as_mut() else {
             if key.code == KeyCode::Tab && self.tree_visible {
                 self.focus = Focus::Tree;
@@ -230,45 +242,58 @@ impl App {
             return;
         };
 
+        // `Shift` turns any motion into a selection; without it the motion
+        // collapses the selection. `nav` makes the step bigger (word / block).
         match key.code {
-            // nav + ↑/↓ : jump to the previous / next blank line (block).
-            KeyCode::Up if nav && !shift => buf.move_para_up(),
+            KeyCode::Up => {
+                buf.sel(shift);
 
-            KeyCode::Down if nav && !shift => buf.move_para_down(),
+                if nav { buf.move_para_up() } else { buf.move_up() }
+            }
 
-            KeyCode::Up => buf.move_up(),
+            KeyCode::Down => {
+                buf.sel(shift);
 
-            KeyCode::Down => buf.move_down(),
+                if nav { buf.move_para_down() } else { buf.move_down() }
+            }
 
-            // Horizontal, fine → coarse: nav+Shift = WORD, Shift = sub-token,
-            // nav = word.
-            KeyCode::Left if nav && shift => buf.move_word_big_left(),
+            KeyCode::Left => {
+                buf.sel(shift);
 
-            KeyCode::Right if nav && shift => buf.move_word_big_right(),
+                if nav { buf.move_word_left() } else { buf.move_left() }
+            }
 
-            KeyCode::Left if plain_shift => buf.move_subtoken_left(),
+            KeyCode::Right => {
+                buf.sel(shift);
 
-            KeyCode::Right if plain_shift => buf.move_subtoken_right(),
+                if nav { buf.move_word_right() } else { buf.move_right() }
+            }
 
-            KeyCode::Left if nav => buf.move_word_left(),
+            KeyCode::Home => {
+                buf.sel(shift);
 
-            KeyCode::Right if nav => buf.move_word_right(),
+                if ctrl { buf.move_doc_start() } else { buf.move_home() }
+            }
 
-            KeyCode::Left => buf.move_left(),
+            KeyCode::End => {
+                buf.sel(shift);
 
-            KeyCode::Right => buf.move_right(),
+                if ctrl { buf.move_doc_end() } else { buf.move_end() }
+            }
 
-            KeyCode::Home if ctrl => buf.move_doc_start(),
+            KeyCode::PageUp => {
+                buf.sel(shift);
 
-            KeyCode::End if ctrl => buf.move_doc_end(),
+                buf.page(-(self.page_rows as isize));
+            }
 
-            KeyCode::Home => buf.move_home(),
+            KeyCode::PageDown => {
+                buf.sel(shift);
 
-            KeyCode::End => buf.move_end(),
+                buf.page(self.page_rows as isize);
+            }
 
-            KeyCode::PageUp => buf.page(-(self.page_rows as isize)),
-
-            KeyCode::PageDown => buf.page(self.page_rows as isize),
+            KeyCode::Esc => buf.clear_selection(),
 
             KeyCode::Enter => buf.insert_newline(),
 
@@ -289,9 +314,17 @@ impl App {
             // readline aliases — give MacBook (no Home/End/forward-Delete keys)
             // a no-Fn path for every motion/edit: start/end of line and forward
             // delete, all on plain Ctrl which works on both platforms.
-            KeyCode::Char('a') if ctrl => buf.move_home(),
+            KeyCode::Char('a') if ctrl => {
+                buf.clear_selection();
 
-            KeyCode::Char('e') if ctrl => buf.move_end(),
+                buf.move_home();
+            }
+
+            KeyCode::Char('e') if ctrl => {
+                buf.clear_selection();
+
+                buf.move_end();
+            }
 
             KeyCode::Char('h') if ctrl => buf.backspace(),
 
@@ -404,6 +437,62 @@ impl App {
 
             Err(e) => self.set_error(format!("Error: {e}")),
         }
+    }
+
+    fn copy(&mut self) {
+        let Some(text) = self.buffer.as_ref().and_then(|b| b.selected_text()) else {
+            self.set_error("Nothing selected".to_string());
+
+            return;
+        };
+
+        self.set_clipboard(text);
+
+        self.flash("Copied".to_string());
+    }
+
+    fn cut(&mut self) {
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        let Some(text) = buf.selected_text() else {
+            self.set_error("Nothing selected".to_string());
+
+            return;
+        };
+
+        buf.delete_selection();
+
+        self.set_clipboard(text);
+
+        self.flash("Cut".to_string());
+    }
+
+    fn paste(&mut self) {
+        let text = self.read_clipboard();
+
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.insert_str(&text);
+        }
+    }
+
+    fn set_clipboard(&mut self, text: String) {
+        if let Some(cb) = self.clipboard.as_mut() {
+            let _ = cb.set_text(text.clone());
+        }
+
+        self.clip_internal = text;
+    }
+
+    fn read_clipboard(&mut self) -> String {
+        if let Some(cb) = self.clipboard.as_mut() {
+            if let Ok(text) = cb.get_text() {
+                return text;
+            }
+        }
+
+        self.clip_internal.clone()
     }
 
     /// A green success message that disappears on its own after a moment.
@@ -631,21 +720,6 @@ mod tests {
     }
 
     #[test]
-    fn nav_shift_right_jumps_by_big_word() {
-        let mut app = app_with("bigword", "foo.bar baz");
-
-        let m = if cfg!(target_os = "macos") {
-            KeyModifiers::ALT | KeyModifiers::SHIFT
-        } else {
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT
-        };
-
-        app.on_key(KeyEvent::new(KeyCode::Right, m));
-
-        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 8);
-    }
-
-    #[test]
     fn nav_up_down_jumps_blocks() {
         let mut app = app_with("blocks", "a\nb\n\nc\n");
 
@@ -655,29 +729,84 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_guards_quit_when_modified() {
+    fn ctrl_q_guards_quit_when_modified() {
         let mut app = app_with("guard", "data");
 
         app.on_key(plain(KeyCode::Char('!')));
 
-        app.on_key(ctrl(KeyCode::Char('c')));
+        app.on_key(ctrl(KeyCode::Char('q')));
 
         assert!(!app.should_quit);
 
         assert!(app.quit_confirm);
 
-        app.on_key(ctrl(KeyCode::Char('c')));
+        app.on_key(ctrl(KeyCode::Char('q')));
 
         assert!(app.should_quit);
     }
 
     #[test]
-    fn ctrl_c_quits_immediately_when_clean() {
+    fn ctrl_q_quits_immediately_when_clean() {
         let mut app = app_with("clean", "data");
 
-        app.on_key(ctrl(KeyCode::Char('c')));
+        app.on_key(ctrl(KeyCode::Char('q')));
 
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn shift_arrow_selects_and_ctrl_c_copies() {
+        let mut app = app_with("selcopy", "hello world");
+
+        app.clipboard = None; // use the internal clipboard; don't touch the OS one
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(shift(KeyCode::Right));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert_eq!(buf.selected_text().as_deref(), Some("he"));
+
+        app.on_key(ctrl(KeyCode::Char('c'))); // copy (no longer quit)
+
+        assert!(!app.should_quit, "Ctrl+C must copy, not quit");
+
+        assert_eq!(app.clip_internal, "he");
+    }
+
+    #[test]
+    fn typing_over_selection_replaces_it() {
+        let mut app = app_with("replace", "abcde");
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(plain(KeyCode::Char('X')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "Xcde");
+    }
+
+    #[test]
+    fn cut_then_paste_round_trips() {
+        let mut app = app_with("cutpaste", "abcde");
+
+        app.clipboard = None; // deterministic: round-trip through the internal clipboard
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(shift(KeyCode::Right)); // select "ab"
+
+        app.on_key(ctrl(KeyCode::Char('x'))); // cut -> "cde"
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "cde");
+
+        app.on_key(ctrl(KeyCode::Char('e'))); // move to end of line
+
+        app.on_key(ctrl(KeyCode::Char('v'))); // paste "ab"
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "cdeab");
     }
 
     #[test]
@@ -715,16 +844,18 @@ mod tests {
     }
 
     #[test]
-    fn shift_arrow_moves_subtoken() {
-        let mut app = app_with("subkey", "getName.id");
+    fn shift_arrow_grows_selection_plain_arrow_clears_it() {
+        let mut app = app_with("selclear", "hello");
 
         app.on_key(shift(KeyCode::Right));
 
-        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 3, "get|");
-
         app.on_key(shift(KeyCode::Right));
 
-        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 7, "Name|");
+        assert_eq!(app.buffer.as_ref().unwrap().selected_text().as_deref(), Some("he"));
+
+        app.on_key(plain(KeyCode::Right)); // a plain move collapses the selection
+
+        assert!(app.buffer.as_ref().unwrap().selection().is_none());
     }
 
     #[test]

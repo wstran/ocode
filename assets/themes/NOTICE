@@ -1,0 +1,25 @@
+Bundled color schemes
+======================
+
+opencode bundles the following community color schemes. opencode uses only the
+foreground (syntax) colors from each; the background defined by a theme is never
+applied, so your terminal's own background is preserved.
+
+Each scheme is distributed under the MIT License by its respective author.
+opencode redistributes the unmodified .tmTheme files; copyright remains with the
+original authors.
+
+  Dracula          https://github.com/dracula/sublime
+  One Dark         https://github.com/andresmichel/one-dark-theme
+  One Half Dark    https://github.com/sonph/onehalf
+  One Half Light   https://github.com/sonph/onehalf
+  Coldark Dark     https://github.com/armandphilippot/coldark-bat
+  Coldark Cold     https://github.com/armandphilippot/coldark-bat
+  Sublime Snazzy   https://github.com/greggb/sublime-snazzy
+  Two Dark         https://github.com/erremauro/TwoDark
+
+The seven base16 / Solarized / GitHub schemes that ship by default come from the
+syntect library (https://github.com/trishume/syntect, MIT).
+
+To add your own: drop any .tmTheme file into  ~/.config/opencode/themes/
+(or $XDG_CONFIG_HOME/opencode/themes/). It is loaded automatically at startup.

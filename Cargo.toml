@@ -1,0 +1,30 @@
+[package]
+name = "opencode"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "A fast, no-frills terminal code reader and editor — open a file or folder and read syntax-highlighted code, then edit, all in your terminal."
+authors = ["Wilson Tran"]
+license = "MIT"
+repository = "https://github.com/wstran/opencode"
+homepage = "https://github.com/wstran/opencode"
+readme = "README.md"
+keywords = ["tui", "editor", "terminal", "cli", "syntax"]
+categories = ["command-line-utilities", "text-editors"]
+
+[[bin]]
+name = "ocode"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+crossterm = "0.29.0"
+ratatui = "0.30.0"
+ropey = "1.6.1"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

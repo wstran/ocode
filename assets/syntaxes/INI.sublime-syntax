@@ -1,0 +1,43 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Sections, comments and key = value pairs.
+name: INI
+file_extensions:
+  - ini
+  - cfg
+  - conf
+scope: source.ini
+contexts:
+  main:
+    - match: '^\s*[;#].*$'
+      scope: comment.line.ini
+    - match: '^\s*(\[)([^\]]*)(\])'
+      captures:
+        1: punctuation.definition.section.begin.ini
+        2: entity.name.section.ini
+        3: punctuation.definition.section.end.ini
+    - match: '^\s*([^=;#\[\s][^=]*?)\s*(=)'
+      captures:
+        1: keyword.other.definition.ini
+        2: punctuation.separator.key-value.ini
+      push: value
+  value:
+    - match: '$'
+      pop: true
+    - match: '[;#].*$'
+      scope: comment.line.ini
+    - match: '"'
+      push: double_quoted
+    - match: '\b\d+(\.\d+)?\b'
+      scope: constant.numeric.ini
+    - match: '\b(true|false|yes|no|on|off)\b'
+      scope: constant.language.ini
+    - match: '.'
+      scope: string.unquoted.ini
+  double_quoted:
+    - match: '"'
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.ini
+    - match: '.'
+      scope: string.quoted.double.ini

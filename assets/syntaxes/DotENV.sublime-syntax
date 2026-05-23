@@ -1,0 +1,48 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal dotenv grammar: comments, keys, values.
+name: DotENV
+file_extensions:
+  - env
+scope: source.env
+contexts:
+  main:
+    - match: '^\s*#.*$'
+      scope: comment.line.number-sign.env
+    - match: '^\s*(?:(export)\s+)?([A-Za-z_][A-Za-z0-9_.]*)\s*(=)'
+      captures:
+        1: keyword.control.export.env
+        2: variable.other.env
+        3: keyword.operator.assignment.env
+      push: value
+  value:
+    - match: '"'
+      scope: punctuation.definition.string.begin.env
+      push: double_quoted
+    - match: "'"
+      scope: punctuation.definition.string.begin.env
+      push: single_quoted
+    - match: '#.*$'
+      scope: comment.line.number-sign.env
+    - match: '$'
+      pop: true
+    - match: '\$\{?[A-Za-z_][A-Za-z0-9_]*\}?'
+      scope: variable.other.env
+    - match: '.'
+      scope: string.unquoted.env
+  double_quoted:
+    - match: '"'
+      scope: punctuation.definition.string.end.env
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.env
+    - match: '\$\{?[A-Za-z_][A-Za-z0-9_]*\}?'
+      scope: variable.other.env
+    - match: '.'
+      scope: string.quoted.double.env
+  single_quoted:
+    - match: "'"
+      scope: punctuation.definition.string.end.env
+      pop: true
+    - match: '.'
+      scope: string.quoted.single.env

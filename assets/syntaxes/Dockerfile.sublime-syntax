@@ -1,0 +1,38 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Instructions, comments, strings and variables.
+name: Dockerfile
+file_extensions:
+  - Dockerfile
+  - dockerfile
+scope: source.dockerfile
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.dockerfile
+    - match: '(?i)^\s*(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\b'
+      scope: keyword.control.dockerfile
+    - match: '(?i)\b(AS)\b'
+      scope: keyword.operator.dockerfile
+    - match: '"'
+      scope: punctuation.definition.string.begin.dockerfile
+      push: double_quoted
+    - match: "'"
+      scope: punctuation.definition.string.begin.dockerfile
+      push: single_quoted
+    - match: '\$\{?[A-Za-z_][A-Za-z0-9_]*\}?'
+      scope: variable.other.dockerfile
+  double_quoted:
+    - match: '"'
+      scope: punctuation.definition.string.end.dockerfile
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.dockerfile
+    - match: '.'
+      scope: string.quoted.double.dockerfile
+  single_quoted:
+    - match: "'"
+      scope: punctuation.definition.string.end.dockerfile
+      pop: true
+    - match: '.'
+      scope: string.quoted.single.dockerfile

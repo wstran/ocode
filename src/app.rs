@@ -1,0 +1,819 @@
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::buffer::{self, Buffer};
+use crate::highlight::SyntaxHighlighter;
+use crate::tree::FileTree;
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum Focus {
+    Tree,
+
+    Editor,
+}
+
+pub struct Search {
+    pub query: String,
+}
+
+pub struct App {
+    pub buffer: Option<Buffer>,
+
+    pub tree: FileTree,
+
+    pub highlighter: SyntaxHighlighter,
+
+    pub focus: Focus,
+
+    pub tree_visible: bool,
+
+    pub search: Option<Search>,
+
+    /// When `Some(idx)` the startup style picker is shown with `idx` highlighted;
+    /// `None` once a style has been chosen and the editor is active.
+    pub picker: Option<usize>,
+
+    pub status: String,
+
+    /// When set, `status` is a success "flash" (green) that auto-clears at this
+    /// instant; `None` means a persistent message (or none).
+    pub status_until: Option<Instant>,
+
+    pub status_ok: bool,
+
+    pub quit_confirm: bool,
+
+    /// A file the user asked to open while the current buffer has unsaved edits;
+    /// opening it again confirms discarding those edits.
+    pub pending_open: Option<PathBuf>,
+
+    pub should_quit: bool,
+
+    /// Visible editor text rows, updated every render so paging knows the step.
+    pub page_rows: usize,
+}
+
+impl App {
+    pub fn new(path: PathBuf, force_picker: bool) -> Result<Self> {
+        let mut highlighter = SyntaxHighlighter::new();
+
+        let is_dir = path.is_dir();
+
+        let (buffer, tree_root, focus, tree_visible) = if is_dir {
+            (None, path.clone(), Focus::Tree, true)
+        } else {
+            let syntax = highlighter.syntax_name_for_path(&path);
+
+            let buf = Buffer::open(path.clone(), syntax)?;
+
+            let root = buffer::parent_dir(&path);
+
+            (Some(buf), root, Focus::Editor, false)
+        };
+
+        // Use the saved style and skip the picker, unless this is the first run
+        // or the user explicitly asked to re-pick with `--style`.
+        let saved = crate::config::saved_theme().and_then(|name| highlighter.theme_index(&name));
+
+        let picker = match saved {
+            Some(idx) => {
+                highlighter.set_theme(idx);
+
+                if force_picker { Some(idx) } else { None }
+            }
+
+            None => Some(highlighter.current_theme()),
+        };
+
+        Ok(Self {
+            buffer,
+            tree: FileTree::new(tree_root),
+            highlighter,
+            focus,
+            tree_visible,
+            search: None,
+            picker,
+            status: String::new(),
+            status_until: None,
+            status_ok: false,
+            quit_confirm: false,
+            pending_open: None,
+            should_quit: false,
+            page_rows: 1,
+        })
+    }
+
+    pub fn on_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        if self.picker.is_some() {
+            self.on_picker_key(key, ctrl);
+
+            return;
+        }
+
+        let is_quit_key = ctrl && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('c'));
+
+        if !is_quit_key {
+            self.quit_confirm = false;
+        }
+
+        if self.search.is_some() {
+            self.on_search_key(key);
+
+            return;
+        }
+
+        if ctrl {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Char('c') => return self.request_quit(),
+
+                KeyCode::Char('s') => return self.save(),
+
+                KeyCode::Char('b') => return self.toggle_tree(),
+
+                KeyCode::Char('f') => return self.open_search(),
+
+                // Other Ctrl combos (Ctrl+arrows, Ctrl+A/E/H) fall through to
+                // the focused pane.
+                _ => {}
+            }
+        }
+
+        match self.focus {
+            Focus::Tree => self.on_tree_key(key),
+
+            Focus::Editor => self.on_editor_key(key),
+        }
+    }
+
+    fn on_picker_key(&mut self, key: KeyEvent, ctrl: bool) {
+        let Some(sel) = self.picker else {
+            return;
+        };
+
+        if ctrl && matches!(key.code, KeyCode::Char('q') | KeyCode::Char('c')) {
+            self.should_quit = true;
+
+            return;
+        }
+
+        let count = self.highlighter.theme_count();
+
+        match key.code {
+            KeyCode::Up => self.picker = Some(sel.saturating_sub(1)),
+
+            KeyCode::Down => self.picker = Some((sel + 1).min(count - 1)),
+
+            KeyCode::Enter => self.apply_style(sel),
+
+            KeyCode::Esc | KeyCode::Char('q') => self.should_quit = true,
+
+            _ => {}
+        }
+    }
+
+    fn apply_style(&mut self, idx: usize) {
+        self.highlighter.set_theme(idx);
+
+        if let Some(name) = self.highlighter.theme_names().get(idx) {
+            let _ = crate::config::save_theme(name);
+        }
+
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.hl.invalidate(0);
+        }
+
+        self.picker = None;
+    }
+
+    fn on_tree_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up => self.tree.move_up(),
+
+            KeyCode::Down => self.tree.move_down(),
+
+            KeyCode::Left => self.tree.collapse(),
+
+            KeyCode::Right => self.tree.expand(),
+
+            KeyCode::Tab => self.focus = Focus::Editor,
+
+            // Enter or Space both open a file / toggle a directory.
+            KeyCode::Enter | KeyCode::Char(' ') => self.activate_tree_entry(),
+
+            _ => {}
+        }
+    }
+
+    fn on_editor_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+        // One navigation modifier per platform — Option on macOS, Ctrl on the
+        // rest — so each combo maps to exactly one action (no Ctrl/Alt aliasing).
+        let nav = if cfg!(target_os = "macos") { alt } else { ctrl };
+
+        let plain_shift = shift && !ctrl && !alt;
+
+        let Some(buf) = self.buffer.as_mut() else {
+            if key.code == KeyCode::Tab && self.tree_visible {
+                self.focus = Focus::Tree;
+            }
+
+            return;
+        };
+
+        match key.code {
+            // nav + ↑/↓ : jump to the previous / next blank line (block).
+            KeyCode::Up if nav && !shift => buf.move_para_up(),
+
+            KeyCode::Down if nav && !shift => buf.move_para_down(),
+
+            KeyCode::Up => buf.move_up(),
+
+            KeyCode::Down => buf.move_down(),
+
+            // Horizontal, fine → coarse: nav+Shift = WORD, Shift = sub-token,
+            // nav = word.
+            KeyCode::Left if nav && shift => buf.move_word_big_left(),
+
+            KeyCode::Right if nav && shift => buf.move_word_big_right(),
+
+            KeyCode::Left if plain_shift => buf.move_subtoken_left(),
+
+            KeyCode::Right if plain_shift => buf.move_subtoken_right(),
+
+            KeyCode::Left if nav => buf.move_word_left(),
+
+            KeyCode::Right if nav => buf.move_word_right(),
+
+            KeyCode::Left => buf.move_left(),
+
+            KeyCode::Right => buf.move_right(),
+
+            KeyCode::Home if ctrl => buf.move_doc_start(),
+
+            KeyCode::End if ctrl => buf.move_doc_end(),
+
+            KeyCode::Home => buf.move_home(),
+
+            KeyCode::End => buf.move_end(),
+
+            KeyCode::PageUp => buf.page(-(self.page_rows as isize)),
+
+            KeyCode::PageDown => buf.page(self.page_rows as isize),
+
+            KeyCode::Enter => buf.insert_newline(),
+
+            KeyCode::Backspace if nav => buf.delete_word_left(),
+
+            KeyCode::Backspace => buf.backspace(),
+
+            KeyCode::Delete => buf.delete(),
+
+            // Undo / redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z). macOS terminals do not
+            // forward Cmd, so Ctrl is used on both platforms.
+            KeyCode::Char('z') | KeyCode::Char('Z') if ctrl && shift => buf.redo(),
+
+            KeyCode::Char('z') | KeyCode::Char('Z') if ctrl => buf.undo(),
+
+            KeyCode::Char('y') if ctrl => buf.redo(),
+
+            // readline aliases — give MacBook (no Home/End/forward-Delete keys)
+            // a no-Fn path for every motion/edit: start/end of line and forward
+            // delete, all on plain Ctrl which works on both platforms.
+            KeyCode::Char('a') if ctrl => buf.move_home(),
+
+            KeyCode::Char('e') if ctrl => buf.move_end(),
+
+            KeyCode::Char('h') if ctrl => buf.backspace(),
+
+            KeyCode::Char('d') if ctrl => buf.delete(),
+
+            // Shift+Tab outdents the current line (Tab below indents).
+            KeyCode::BackTab => buf.outdent_line(),
+
+            KeyCode::Tab => {
+                if self.tree_visible {
+                    self.focus = Focus::Tree;
+                } else {
+                    buf.indent_line();
+                }
+            }
+
+            KeyCode::Char(c) if !ctrl && !alt => buf.insert_char(c),
+
+            _ => {}
+        }
+    }
+
+    fn on_search_key(&mut self, key: KeyEvent) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.search = None;
+
+                self.clear_flash();
+            }
+
+            KeyCode::Backspace => {
+                search.query.pop();
+            }
+
+            KeyCode::Enter => self.find_next(),
+
+            KeyCode::Char(c) => search.query.push(c),
+
+            _ => {}
+        }
+    }
+
+    fn activate_tree_entry(&mut self) {
+        let Some(node) = self.tree.selected_node() else {
+            return;
+        };
+
+        if node.is_dir {
+            if node.expanded {
+                self.tree.collapse();
+            } else {
+                self.tree.expand();
+            }
+
+            return;
+        }
+
+        let path = node.path.clone();
+
+        let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
+
+        // Switching files must never silently lose edits: warn once, then let a
+        // second Enter on the same file discard them (or Ctrl+S to keep them).
+        if dirty && self.pending_open.as_deref() != Some(path.as_path()) {
+            self.pending_open = Some(path);
+
+            self.set_error("Unsaved changes — Ctrl+S to save, or Enter again to discard & open".to_string());
+
+            return;
+        }
+
+        self.open_file(path);
+    }
+
+    fn open_file(&mut self, path: PathBuf) {
+        let syntax = self.highlighter.syntax_name_for_path(&path);
+
+        match Buffer::open(path, syntax) {
+            Ok(buf) => {
+                self.buffer = Some(buf);
+
+                self.focus = Focus::Editor;
+
+                self.pending_open = None;
+
+                self.clear_flash();
+            }
+
+            Err(e) => self.set_error(format!("Error: {e}")),
+        }
+    }
+
+    fn save(&mut self) {
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        match buf.save() {
+            Ok(()) => {
+                let name = buf.file_name();
+
+                self.pending_open = None;
+
+                self.flash(format!("✓ Saved {name}"));
+            }
+
+            Err(e) => self.set_error(format!("Error: {e}")),
+        }
+    }
+
+    /// A green success message that disappears on its own after a moment.
+    fn flash(&mut self, msg: String) {
+        self.status = msg;
+
+        self.status_ok = true;
+
+        self.status_until = Some(Instant::now() + Duration::from_millis(1500));
+    }
+
+    /// A message that stays until the next action (e.g. an error).
+    fn set_error(&mut self, msg: String) {
+        self.status = msg;
+
+        self.status_ok = false;
+
+        self.status_until = None;
+    }
+
+    /// Remaining lifetime of the current flash, clearing it once elapsed. The
+    /// run loop uses this as its poll timeout so the flash fades by itself.
+    pub fn flash_timeout(&mut self) -> Option<Duration> {
+        let until = self.status_until?;
+
+        let now = Instant::now();
+
+        if until > now {
+            Some(until - now)
+        } else {
+            self.clear_flash();
+
+            None
+        }
+    }
+
+    pub fn clear_flash(&mut self) {
+        self.status.clear();
+
+        self.status_ok = false;
+
+        self.status_until = None;
+    }
+
+    /// Ctrl+B as a three-step cycle so one key both opens the file list and
+    /// returns to it: hidden → show & focus → (from editor) focus it → hide.
+    fn toggle_tree(&mut self) {
+        if !self.tree_visible {
+            self.tree_visible = true;
+
+            self.focus = Focus::Tree;
+        } else if self.focus != Focus::Tree {
+            self.focus = Focus::Tree;
+        } else {
+            self.tree_visible = false;
+
+            self.focus = Focus::Editor;
+        }
+    }
+
+    fn open_search(&mut self) {
+        if self.buffer.is_some() {
+            self.search = Some(Search {
+                query: String::new(),
+            });
+        }
+    }
+
+    fn find_next(&mut self) {
+        let Some(query) = self.search.as_ref().map(|s| s.query.clone()) else {
+            return;
+        };
+
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        let from = buf.char_idx() + 1;
+
+        let found = buffer::find_next(&buf.rope, &query, from);
+
+        if let Some(idx) = found {
+            buf.move_to_char(idx);
+        }
+
+        match found {
+            Some(_) => self.flash(format!("Found '{query}'")),
+
+            None => self.set_error(format!("Not found: '{query}'")),
+        }
+    }
+
+    fn request_quit(&mut self) {
+        let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
+
+        if dirty && !self.quit_confirm {
+            self.quit_confirm = true;
+
+            self.set_error("Unsaved changes — Ctrl+Q again to quit, or Ctrl+S to save".to_string());
+        } else {
+            self.should_quit = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::fs;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn app_with(name: &str, text: &str) -> App {
+        let path = std::env::temp_dir().join(format!("opencode_app_{name}.txt"));
+
+        fs::write(&path, text).unwrap();
+
+        let mut app = App::new(path, false).unwrap();
+
+        app.picker = None;
+
+        app
+    }
+
+    fn plain(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    /// The platform navigation modifier the editor actually listens to.
+    fn nav(code: KeyCode) -> KeyEvent {
+        let m = if cfg!(target_os = "macos") {
+            KeyModifiers::ALT
+        } else {
+            KeyModifiers::CONTROL
+        };
+
+        KeyEvent::new(code, m)
+    }
+
+    fn shift(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+
+    #[test]
+    fn typing_inserts_and_marks_modified() {
+        let mut app = app_with("type", "ab cd");
+
+        app.on_key(plain(KeyCode::Char('X')));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert!(buf.modified);
+
+        assert_eq!(buf.rope.to_string(), "Xab cd");
+    }
+
+    #[test]
+    fn ctrl_letter_is_not_inserted_as_text() {
+        let mut app = app_with("ctrlletter", "ab");
+
+        app.on_key(ctrl(KeyCode::Char('e')));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert!(!buf.modified, "Ctrl+E must not type a character");
+
+        assert_eq!(buf.cursor_col, 2, "Ctrl+E should jump to end of line");
+    }
+
+    #[test]
+    fn line_motion_works_without_fn() {
+        let mut app = app_with("linemo", "hello world");
+
+        // MacBook has no Home/End keys, so Ctrl+A / Ctrl+E must reach line ends.
+        app.on_key(ctrl(KeyCode::Char('e')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 11);
+
+        app.on_key(ctrl(KeyCode::Char('a')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
+
+        // The dedicated keys (PC, or MacBook via Fn+←/→) still work too.
+        app.on_key(plain(KeyCode::End));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 11);
+
+        app.on_key(plain(KeyCode::Home));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
+    }
+
+    #[test]
+    fn ctrl_d_deletes_forward_without_fn() {
+        let mut app = app_with("fwddel", "abc");
+
+        app.on_key(ctrl(KeyCode::Char('d')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "bc");
+    }
+
+    #[test]
+    fn nav_up_reaches_doc_top_without_fn() {
+        let mut app = app_with("doctop", "one\ntwo\nthree");
+
+        app.buffer.as_mut().unwrap().cursor_line = 2;
+
+        app.on_key(nav(KeyCode::Up)); // block jump with no blank line lands at top
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_line, 0);
+    }
+
+    #[test]
+    fn nav_right_jumps_by_word() {
+        let mut app = app_with("navword", "foo bar");
+
+        app.on_key(nav(KeyCode::Right));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 3);
+    }
+
+    #[test]
+    fn nav_shift_right_jumps_by_big_word() {
+        let mut app = app_with("bigword", "foo.bar baz");
+
+        let m = if cfg!(target_os = "macos") {
+            KeyModifiers::ALT | KeyModifiers::SHIFT
+        } else {
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT
+        };
+
+        app.on_key(KeyEvent::new(KeyCode::Right, m));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 8);
+    }
+
+    #[test]
+    fn nav_up_down_jumps_blocks() {
+        let mut app = app_with("blocks", "a\nb\n\nc\n");
+
+        app.on_key(nav(KeyCode::Down));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_line, 2);
+    }
+
+    #[test]
+    fn ctrl_c_guards_quit_when_modified() {
+        let mut app = app_with("guard", "data");
+
+        app.on_key(plain(KeyCode::Char('!')));
+
+        app.on_key(ctrl(KeyCode::Char('c')));
+
+        assert!(!app.should_quit);
+
+        assert!(app.quit_confirm);
+
+        app.on_key(ctrl(KeyCode::Char('c')));
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_quits_immediately_when_clean() {
+        let mut app = app_with("clean", "data");
+
+        app.on_key(ctrl(KeyCode::Char('c')));
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_b_cycles_tree_open_focus_hide() {
+        let mut app = app_with("tree", "x");
+
+        assert!(!app.tree_visible);
+
+        app.on_key(ctrl(KeyCode::Char('b')));
+
+        assert!(app.tree_visible && app.focus == Focus::Tree);
+
+        app.focus = Focus::Editor;
+
+        app.on_key(ctrl(KeyCode::Char('b')));
+
+        assert!(app.tree_visible && app.focus == Focus::Tree);
+
+        app.on_key(ctrl(KeyCode::Char('b')));
+
+        assert!(!app.tree_visible && app.focus == Focus::Editor);
+    }
+
+    #[test]
+    fn tab_indents_backtab_outdents() {
+        let mut app = app_with("indentkey", "foo");
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "    foo");
+
+        app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "foo");
+    }
+
+    #[test]
+    fn shift_arrow_moves_subtoken() {
+        let mut app = app_with("subkey", "getName.id");
+
+        app.on_key(shift(KeyCode::Right));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 3, "get|");
+
+        app.on_key(shift(KeyCode::Right));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 7, "Name|");
+    }
+
+    #[test]
+    fn plain_angle_bracket_is_inserted() {
+        let mut app = app_with("angle", "");
+
+        app.on_key(plain(KeyCode::Char('>')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), ">");
+    }
+
+    #[test]
+    fn switching_files_warns_then_discards() {
+        let dir = std::env::temp_dir().join("opencode_switch_test");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("a.txt"), "aaa").unwrap();
+
+        fs::write(dir.join("b.txt"), "bbb").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(plain(KeyCode::Enter)); // open a.txt (selected first)
+
+        app.on_key(plain(KeyCode::Char('X'))); // make it dirty
+
+        assert!(app.buffer.as_ref().unwrap().modified);
+
+        app.on_key(ctrl(KeyCode::Char('b'))); // focus the tree
+
+        app.on_key(plain(KeyCode::Down)); // select b.txt
+
+        app.on_key(plain(KeyCode::Enter)); // first Enter: warn, do not switch
+
+        assert!(app.buffer.as_ref().unwrap().rope.to_string().contains("aaa"));
+
+        assert!(app.status.contains("Unsaved"));
+
+        app.on_key(plain(KeyCode::Enter)); // second Enter: discard & open b
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "bbb");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn space_opens_file_in_tree() {
+        let dir = std::env::temp_dir().join("opencode_space_test");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        assert!(app.buffer.is_none());
+
+        app.on_key(plain(KeyCode::Char(' '))); // Space opens the selected file
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hello");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ctrl_z_undoes_and_ctrl_y_redoes() {
+        let mut app = app_with("undokey", "");
+
+        app.on_key(plain(KeyCode::Char('h')));
+
+        app.on_key(plain(KeyCode::Char('i')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hi");
+
+        app.on_key(ctrl(KeyCode::Char('z')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "");
+
+        app.on_key(ctrl(KeyCode::Char('y')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hi");
+    }
+}

@@ -1,0 +1,15 @@
+Bundled language grammars
+==========================
+
+opencode ships syntect's 75 default grammars plus these extras:
+
+  TOML        — upstream grammar, MIT.
+                https://github.com/jasonwilliams/sublime_toml_highlighting
+
+  DotENV      — authored for opencode (MIT). Minimal .env grammar.
+  INI         — authored for opencode (MIT). Sections / key=value / comments.
+  Dockerfile  — authored for opencode (MIT). Instructions / strings / vars.
+
+Add your own: drop a `.sublime-syntax` file into
+  ~/.config/opencode/syntaxes/   (or $XDG_CONFIG_HOME/opencode/syntaxes/)
+and it is compiled into the syntax set at startup.

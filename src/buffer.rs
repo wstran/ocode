@@ -123,6 +123,13 @@ impl Buffer {
         self.anchor = None;
     }
 
+    /// Select the entire buffer (anchor at the start, cursor at the end).
+    pub fn select_all(&mut self) {
+        self.anchor = Some(0);
+
+        self.move_to_char(self.rope.len_chars());
+    }
+
     /// The selected char range `(start, end)` with `start <= end`, or `None`
     /// when there is no selection (no anchor, or anchor == cursor).
     pub fn selection(&self) -> Option<(usize, usize)> {

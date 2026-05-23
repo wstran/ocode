@@ -69,11 +69,15 @@ that adapts to the OS is the **navigation modifier**, written `nav` below:
 | Key                            | Action                                          |
 |--------------------------------|-------------------------------------------------|
 | `Ctrl+S`                       | Save (flashes a green ✓ Saved)                  |
+| `Ctrl+A`                       | Select all                                      |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste the selection                |
 | `Ctrl+Z` / `Ctrl+Y`            | Undo / redo (`Ctrl+Shift+Z` also redoes)        |
 | `Ctrl+F`                       | Search in the current file                      |
 | `Ctrl+B`                       | File browser: open & focus → back to it → hide  |
 | `Ctrl+Q`                       | Quit (press twice if there are unsaved changes) |
+
+Every `Ctrl`-letter is a **command** (above); cursor motion and editing live on
+the **dedicated keys** below — one consistent rule.
 
 ### Move & select
 
@@ -86,8 +90,8 @@ moves the cursor and clears the selection. `nav` makes the step bigger.
 | By word               | `nav + ←/→`          | by word           |
 | Up / down             | `↑` / `↓`            | by line           |
 | By block (blank line) | `nav + ↑/↓`          | by block          |
-| Line start / end      | `Ctrl+A` / `Ctrl+E` (or `Home`/`End`) | to line edge |
-| File start / end      | `Ctrl+Home` / `Ctrl+End` | to file edge  |
+| Line start / end      | `Home` / `End`      | to line edge      |
+| File start / end      | `Ctrl+Home` / `Ctrl+End` | to file edge |
 | Scroll a screen       | `PageUp` / `PageDown` | a screen         |
 
 ### Edit
@@ -96,8 +100,8 @@ moves the cursor and clears the selection. `nav` makes the step bigger.
 |------------------------|----------------------------------------------|
 | any character / paste  | Insert — **replaces the selection** if any   |
 | `Enter`                | New line (keeps the current indent)          |
-| `Backspace` / `Ctrl+H` | Delete left, or the selection                |
-| `Delete` / `Ctrl+D`    | Delete right, or the selection               |
+| `Backspace`            | Delete left, or the selection                |
+| `Delete`               | Delete right, or the selection               |
 | `nav + Backspace`      | Delete the previous word                     |
 | `Tab` / `Shift+Tab`    | Indent / outdent the current line            |
 
@@ -114,10 +118,10 @@ moves the cursor and clears the selection. `nav` makes the step bigger.
 Switching files with unsaved edits warns first (`Ctrl+S` to save, or confirm
 again to discard).
 
-> **MacBook (no Home/End/PageUp keys):** you never need them. `Ctrl+A`/`Ctrl+E`
-> reach line ends, `nav + ↑/↓` jumps far (to the file's top/bottom), and
-> `Ctrl+D` forward-deletes — all without `Fn`. The dedicated keys still work via
-> `Fn + arrows` if you have them.
+> **MacBook (no Home/End/PageUp keys):** use `Fn + ←/→` for line start/end,
+> `Fn + ↑/↓` to scroll, `Fn + Delete` for forward-delete. Or skip `Fn` entirely:
+> `nav + ↑/↓` jumps to the file's top/bottom, and word/block motions are all on
+> `Option + arrows`.
 
 ## Styles
 

@@ -151,8 +151,10 @@ impl App {
 
                 KeyCode::Char('v') => return self.paste(),
 
-                // Other Ctrl combos (Ctrl+arrows, Ctrl+A/E/H/Z/Y, …) fall
-                // through to the focused pane.
+                KeyCode::Char('a') => return self.select_all(),
+
+                // Other Ctrl combos (Ctrl+arrows, Ctrl+Z/Y, …) fall through to
+                // the focused pane.
                 _ => {}
             }
         }
@@ -311,25 +313,6 @@ impl App {
 
             KeyCode::Char('y') if ctrl => buf.redo(),
 
-            // readline aliases — give MacBook (no Home/End/forward-Delete keys)
-            // a no-Fn path for every motion/edit: start/end of line and forward
-            // delete, all on plain Ctrl which works on both platforms.
-            KeyCode::Char('a') if ctrl => {
-                buf.clear_selection();
-
-                buf.move_home();
-            }
-
-            KeyCode::Char('e') if ctrl => {
-                buf.clear_selection();
-
-                buf.move_end();
-            }
-
-            KeyCode::Char('h') if ctrl => buf.backspace(),
-
-            KeyCode::Char('d') if ctrl => buf.delete(),
-
             // Shift+Tab outdents the current line (Tab below indents).
             KeyCode::BackTab => buf.outdent_line(),
 
@@ -474,6 +457,12 @@ impl App {
 
         if let Some(buf) = self.buffer.as_mut() {
             buf.insert_str(&text);
+        }
+    }
+
+    fn select_all(&mut self) {
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.select_all();
         }
     }
 
@@ -655,32 +644,23 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_letter_is_not_inserted_as_text() {
+    fn ctrl_letter_command_does_not_type_text() {
         let mut app = app_with("ctrlletter", "ab");
 
-        app.on_key(ctrl(KeyCode::Char('e')));
+        // An unbound Ctrl+letter must never insert that letter.
+        app.on_key(ctrl(KeyCode::Char('g')));
 
         let buf = app.buffer.as_ref().unwrap();
 
-        assert!(!buf.modified, "Ctrl+E must not type a character");
+        assert!(!buf.modified);
 
-        assert_eq!(buf.cursor_col, 2, "Ctrl+E should jump to end of line");
+        assert_eq!(buf.rope.to_string(), "ab");
     }
 
     #[test]
-    fn line_motion_works_without_fn() {
+    fn home_end_are_line_motions() {
         let mut app = app_with("linemo", "hello world");
 
-        // MacBook has no Home/End keys, so Ctrl+A / Ctrl+E must reach line ends.
-        app.on_key(ctrl(KeyCode::Char('e')));
-
-        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 11);
-
-        app.on_key(ctrl(KeyCode::Char('a')));
-
-        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
-
-        // The dedicated keys (PC, or MacBook via Fn+←/→) still work too.
         app.on_key(plain(KeyCode::End));
 
         assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 11);
@@ -691,12 +671,15 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_d_deletes_forward_without_fn() {
-        let mut app = app_with("fwddel", "abc");
+    fn ctrl_a_selects_all() {
+        let mut app = app_with("selectall", "line one\nline two\n");
 
-        app.on_key(ctrl(KeyCode::Char('d')));
+        app.on_key(ctrl(KeyCode::Char('a')));
 
-        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "bc");
+        assert_eq!(
+            app.buffer.as_ref().unwrap().selected_text().as_deref(),
+            Some("line one\nline two\n")
+        );
     }
 
     #[test]
@@ -802,7 +785,7 @@ mod tests {
 
         assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "cde");
 
-        app.on_key(ctrl(KeyCode::Char('e'))); // move to end of line
+        app.on_key(plain(KeyCode::End)); // move to end of line
 
         app.on_key(ctrl(KeyCode::Char('v'))); // paste "ab"
 

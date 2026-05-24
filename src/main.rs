@@ -62,14 +62,14 @@ fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
             return Ok(());
         }
 
-        // Block on input, except while a "flash" message is showing: then wake
-        // when it expires so the bar can clear itself.
-        match app.flash_timeout() {
-            Some(remaining) => {
-                if event::poll(remaining)? {
+        // Block on input, but wake periodically while a file is open (to watch
+        // for external changes) or while a flash message is fading.
+        match app.wake_after() {
+            Some(timeout) => {
+                if event::poll(timeout)? {
                     read_key(app)?;
                 } else {
-                    app.clear_flash();
+                    app.tick();
                 }
             }
 

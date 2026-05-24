@@ -69,6 +69,7 @@ that adapts to the OS is the **navigation modifier**, written `nav` below:
 | Key                            | Action                                          |
 |--------------------------------|-------------------------------------------------|
 | `Ctrl+S`                       | Save (flashes a green ✓ Saved)                  |
+| `Ctrl+R`                       | Reload the file from disk (undoable)            |
 | `Ctrl+A`                       | Select all                                      |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste the selection                |
 | `Ctrl+Z` / `Ctrl+Y`            | Undo / redo (`Ctrl+Shift+Z` also redoes)        |
@@ -123,6 +124,17 @@ with unsaved edits warns first (`Ctrl+S` to save, or confirm again to discard).
 > `nav + ↑/↓` jumps to the file's top/bottom, and word/block motions are all on
 > `Option + arrows`.
 
+## Changes on disk
+
+opencode watches the open file (a light mtime check ~1×/s). If another program
+edits it:
+
+- **No unsaved edits here** → it **auto-reloads** (flashes *↻ Reloaded*). The
+  reload is undoable, so `Ctrl+Z` brings back the previous version.
+- **You have unsaved edits** → it does **not** clobber anything: the status bar
+  turns amber — *⚠ changed on disk* — and you choose **`Ctrl+R`** to reload
+  (discard yours) or **`Ctrl+S` twice** to overwrite with yours.
+
 ## Styles
 
 A style only recolors your **code** — opencode never paints a background, so
@@ -146,8 +158,8 @@ TOML, `.env`, INI and Dockerfile). Add any `.sublime-syntax` grammar in
 - **rope buffer** (`ropey`) — large files edit in O(log n), not O(n).
 - **incremental highlighting** — only visible lines are highlighted, resuming
   from a cached parser checkpoint; an edit re-highlights from that line down.
-- **input-driven loop** — redraws on keypress, so it sits at 0% CPU while idle;
-  the only timed wake-up fades the save flash.
+- **input-driven loop** — redraws on keypress, so it sits at ~0% CPU; while a
+  file is open it wakes about once a second for a cheap mtime check.
 - **O(1) undo snapshots** — cheap rope clones, grouped at word boundaries.
 
 ## Project layout

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use ropey::Rope;
@@ -8,6 +9,19 @@ use crate::highlight::HlCache;
 
 const INDENT: &str = "    ";
 const UNDO_LIMIT: usize = 600;
+
+/// Result of checking the open file against its on-disk version.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum DiskEvent {
+    /// No change, or the change was reconciled with no user action needed.
+    Unchanged,
+
+    /// The buffer was clean, so it was auto-reloaded from disk (undoable).
+    Reloaded,
+
+    /// The buffer has unsaved edits and the disk changed — needs the user.
+    Conflict,
+}
 
 /// Kind of the last edit, used to coalesce undo steps: a run of plain typing or
 /// a run of deletes folds into one undoable group; everything else stands alone.
@@ -70,6 +84,14 @@ pub struct Buffer {
     /// Fixed end of the selection (char index); the cursor is the moving end.
     /// `None` means no active selection.
     anchor: Option<usize>,
+
+    /// Modification time of the file as we last read/wrote it; used to notice
+    /// edits made by another program. `None` for a not-yet-existing file.
+    disk_mtime: Option<SystemTime>,
+
+    /// `true` when the file changed on disk while this buffer had unsaved edits
+    /// (a conflict the user must resolve with reload or overwrite).
+    pub disk_changed: bool,
 }
 
 impl Buffer {
@@ -86,9 +108,13 @@ impl Buffer {
 
         let rope = Rope::from_str(&text);
 
+        let disk_mtime = file_mtime(&path);
+
         Ok(Self {
             saved: rope.clone(),
             rope,
+            disk_mtime,
+            disk_changed: false,
             path,
             cursor_line: 0,
             cursor_col: 0,
@@ -285,7 +311,111 @@ impl Buffer {
 
         self.modified = false;
 
+        self.disk_changed = false;
+
+        // Remember our own write so the next poll doesn't flag it as external.
+        self.disk_mtime = file_mtime(&self.path);
+
         Ok(())
+    }
+
+    /// Compare the open file with its on-disk version. A clean buffer is
+    /// auto-reloaded; a dirty one flags a conflict for the user to resolve.
+    /// Cheap: only re-reads when the file's mtime actually changed.
+    pub fn poll_disk(&mut self) -> DiskEvent {
+        let Some(mtime) = file_mtime(&self.path) else {
+            return DiskEvent::Unchanged;
+        };
+
+        if Some(mtime) == self.disk_mtime {
+            return DiskEvent::Unchanged;
+        }
+
+        self.disk_mtime = Some(mtime);
+
+        let Ok(text) = fs::read_to_string(&self.path) else {
+            return DiskEvent::Unchanged;
+        };
+
+        let disk = Rope::from_str(&text);
+
+        if disk == self.saved {
+            return DiskEvent::Unchanged;
+        }
+
+        if disk == self.rope {
+            // Disk now matches our buffer exactly — we are effectively saved.
+            self.saved = disk;
+
+            self.modified = false;
+
+            self.disk_changed = false;
+
+            return DiskEvent::Unchanged;
+        }
+
+        if self.rope == self.saved {
+            self.apply_disk_content(disk);
+
+            DiskEvent::Reloaded
+        } else {
+            self.disk_changed = true;
+
+            DiskEvent::Conflict
+        }
+    }
+
+    /// Replace the buffer with the file's current contents (used by Ctrl+R and
+    /// conflict resolution). Undoable — Ctrl+Z restores the previous text.
+    pub fn reload_from_disk(&mut self) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+
+        self.apply_disk_content(Rope::from_str(&text));
+
+        self.disk_mtime = file_mtime(&self.path);
+
+        Ok(())
+    }
+
+    /// Swap in new content as one undoable step (push the current state first),
+    /// then reset selection, clamp the cursor and refresh derived state.
+    fn apply_disk_content(&mut self, disk: Rope) {
+        self.undo_stack.push(self.snapshot());
+
+        if self.undo_stack.len() > UNDO_LIMIT {
+            self.undo_stack.remove(0);
+        }
+
+        self.redo_stack.clear();
+
+        self.last_edit = None;
+
+        self.last_edit_pos = None;
+
+        self.last_insert_char = None;
+
+        self.rope = disk.clone();
+
+        self.saved = disk;
+
+        self.anchor = None;
+
+        self.clamp_cursor();
+
+        self.hl.invalidate(0);
+
+        self.modified = false;
+
+        self.disk_changed = false;
+    }
+
+    fn clamp_cursor(&mut self) {
+        self.cursor_line = self.cursor_line.min(self.last_line());
+
+        self.cursor_col = self.cursor_col.min(self.line_len(self.cursor_line));
+
+        self.desired_col = self.cursor_col;
     }
 
     pub fn last_line(&self) -> usize {
@@ -800,6 +930,10 @@ pub fn parent_dir(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+fn file_mtime(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,6 +960,8 @@ mod tests {
             last_edit_pos: None,
             last_insert_char: None,
             anchor: None,
+            disk_mtime: None,
+            disk_changed: false,
         }
     }
 
@@ -1162,6 +1298,85 @@ mod tests {
         assert_eq!(b.rope.to_string(), "H world");
 
         assert!(b.selection().is_none());
+    }
+
+    #[test]
+    fn poll_auto_reloads_a_clean_buffer() {
+        let path = std::env::temp_dir().join("opencode_poll_clean.txt");
+
+        fs::write(&path, "v1\n").unwrap();
+
+        let mut b = Buffer::open(path.clone(), "Plain Text".to_string()).unwrap();
+
+        fs::write(&path, "v2\n").unwrap(); // external change
+
+        b.disk_mtime = None; // force re-detect regardless of mtime granularity
+
+        assert_eq!(b.poll_disk(), DiskEvent::Reloaded);
+
+        assert_eq!(b.rope.to_string(), "v2\n");
+
+        assert!(!b.modified);
+
+        b.undo(); // reload is undoable
+
+        assert_eq!(b.rope.to_string(), "v1\n");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_flags_conflict_for_a_dirty_buffer() {
+        let path = std::env::temp_dir().join("opencode_poll_conflict.txt");
+
+        fs::write(&path, "v1\n").unwrap();
+
+        let mut b = Buffer::open(path.clone(), "Plain Text".to_string()).unwrap();
+
+        b.insert_char('X'); // dirty: "Xv1\n"
+
+        fs::write(&path, "v2\n").unwrap();
+
+        b.disk_mtime = None;
+
+        assert_eq!(b.poll_disk(), DiskEvent::Conflict);
+
+        assert!(b.disk_changed);
+
+        assert_eq!(b.rope.to_string(), "Xv1\n"); // not auto-reloaded
+
+        b.reload_from_disk().unwrap(); // Ctrl+R resolves it
+
+        assert_eq!(b.rope.to_string(), "v2\n");
+
+        assert!(!b.disk_changed);
+
+        b.undo(); // reload is undoable -> our edits come back
+
+        assert_eq!(b.rope.to_string(), "Xv1\n");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_ignores_our_own_save() {
+        let path = std::env::temp_dir().join("opencode_poll_save.txt");
+
+        fs::write(&path, "v1\n").unwrap();
+
+        let mut b = Buffer::open(path.clone(), "Plain Text".to_string()).unwrap();
+
+        b.insert_char('X');
+
+        b.save().unwrap();
+
+        b.disk_mtime = None;
+
+        assert_eq!(b.poll_disk(), DiskEvent::Unchanged);
+
+        assert!(!b.disk_changed);
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

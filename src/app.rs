@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::buffer::{self, Buffer};
+use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
 use crate::tree::FileTree;
 
@@ -45,6 +45,10 @@ pub struct App {
     pub status_ok: bool,
 
     pub quit_confirm: bool,
+
+    /// Set after a refused save when the file changed on disk; a second Ctrl+S
+    /// then overwrites it.
+    pub overwrite_confirm: bool,
 
     /// A file the user asked to open while the current buffer has unsaved edits;
     /// opening it again confirms discarding those edits.
@@ -106,6 +110,7 @@ impl App {
             status_until: None,
             status_ok: false,
             quit_confirm: false,
+            overwrite_confirm: false,
             pending_open: None,
             should_quit: false,
             page_rows: 1,
@@ -127,6 +132,10 @@ impl App {
 
         if !is_quit_key {
             self.quit_confirm = false;
+        }
+
+        if !(ctrl && key.code == KeyCode::Char('s')) {
+            self.overwrite_confirm = false;
         }
 
         if self.search.is_some() {
@@ -152,6 +161,8 @@ impl App {
                 KeyCode::Char('v') => return self.paste(),
 
                 KeyCode::Char('a') => return self.select_all(),
+
+                KeyCode::Char('r') => return self.reload(),
 
                 // Other Ctrl combos (Ctrl+arrows, Ctrl+Z/Y, …) fall through to
                 // the focused pane.
@@ -413,9 +424,22 @@ impl App {
             return;
         };
 
+        // Guard against clobbering an external change with a single keystroke.
+        if buf.disk_changed && !self.overwrite_confirm {
+            self.overwrite_confirm = true;
+
+            self.set_error(
+                "⚠ Changed on disk — Ctrl+S again to overwrite, or Ctrl+R to reload".to_string(),
+            );
+
+            return;
+        }
+
         match buf.save() {
             Ok(()) => {
                 let name = buf.file_name();
+
+                self.overwrite_confirm = false;
 
                 self.pending_open = None;
 
@@ -424,6 +448,59 @@ impl App {
 
             Err(e) => self.set_error(format!("Error: {e}")),
         }
+    }
+
+    fn reload(&mut self) {
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        match buf.reload_from_disk() {
+            Ok(()) => self.flash("↻ Reloaded from disk".to_string()),
+
+            Err(e) => self.set_error(format!("Error: {e}")),
+        }
+    }
+
+    /// Check the open file against disk (called on idle ticks). Clean buffers
+    /// auto-reload; the conflict warning is derived from `buf.disk_changed`.
+    fn poll_disk(&mut self) {
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        if buf.poll_disk() == DiskEvent::Reloaded {
+            self.flash("↻ Reloaded from disk".to_string());
+        }
+    }
+
+    /// How long the run loop should wait before waking itself: the sooner of a
+    /// fading flash and the disk-poll interval (only while a file is open).
+    pub fn wake_after(&self) -> Option<Duration> {
+        let mut wake: Option<Duration> = None;
+
+        if let Some(until) = self.status_until {
+            wake = Some(until.saturating_duration_since(Instant::now()));
+        }
+
+        if self.buffer.is_some() {
+            let poll = Duration::from_millis(1000);
+
+            wake = Some(wake.map_or(poll, |w| w.min(poll)));
+        }
+
+        wake
+    }
+
+    /// Idle housekeeping done when the loop wakes without a keypress.
+    pub fn tick(&mut self) {
+        if let Some(until) = self.status_until {
+            if Instant::now() >= until {
+                self.clear_flash();
+            }
+        }
+
+        self.poll_disk();
     }
 
     fn copy(&mut self) {
@@ -504,22 +581,6 @@ impl App {
         self.status_ok = false;
 
         self.status_until = None;
-    }
-
-    /// Remaining lifetime of the current flash, clearing it once elapsed. The
-    /// run loop uses this as its poll timeout so the flash fades by itself.
-    pub fn flash_timeout(&mut self) -> Option<Duration> {
-        let until = self.status_until?;
-
-        let now = Instant::now();
-
-        if until > now {
-            Some(until - now)
-        } else {
-            self.clear_flash();
-
-            None
-        }
     }
 
     pub fn clear_flash(&mut self) {
@@ -939,6 +1000,62 @@ mod tests {
         assert!(app.buffer.is_some());
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn save_conflict_needs_a_second_ctrl_s() {
+        let path = std::env::temp_dir().join("opencode_app_conflict.txt");
+
+        fs::write(&path, "v1\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(plain(KeyCode::Char('X'))); // dirty: "Xv1\n"
+
+        fs::write(&path, "v2\n").unwrap(); // external change
+
+        app.buffer.as_mut().unwrap().disk_changed = true; // (detection covered by buffer tests)
+
+        app.on_key(ctrl(KeyCode::Char('s'))); // refused, arms overwrite
+
+        assert!(app.overwrite_confirm);
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "v2\n"); // not written yet
+
+        app.on_key(ctrl(KeyCode::Char('s'))); // overwrite
+
+        assert!(!app.buffer.as_ref().unwrap().disk_changed);
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "Xv1\n");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn ctrl_r_reloads_from_disk() {
+        let path = std::env::temp_dir().join("opencode_app_reload.txt");
+
+        fs::write(&path, "v1\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(plain(KeyCode::Char('X')));
+
+        fs::write(&path, "v2\n").unwrap();
+
+        app.buffer.as_mut().unwrap().disk_changed = true;
+
+        app.on_key(ctrl(KeyCode::Char('r'))); // reload from disk
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "v2\n");
+
+        assert!(!app.buffer.as_ref().unwrap().disk_changed);
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

@@ -399,7 +399,14 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    let base = if app.status_ok {
+    let conflict = app.search.is_none() && app.buffer.as_ref().is_some_and(|b| b.disk_changed);
+
+    let base = if conflict {
+        Style::default()
+            .bg(Color::Rgb(176, 132, 47))
+            .fg(Color::Rgb(24, 24, 24))
+            .add_modifier(Modifier::BOLD)
+    } else if app.status_ok {
         Style::default()
             .bg(Color::Rgb(63, 115, 74))
             .fg(Color::Rgb(228, 240, 228))
@@ -412,6 +419,15 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 
     let (left, right) = if let Some(search) = &app.search {
         (format!(" Find: {}", search.query), " Enter: next  Esc: close ".to_string())
+    } else if conflict {
+        let buf = app.buffer.as_ref().unwrap();
+
+        let right = format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1);
+
+        (
+            format!(" ⚠ {} changed on disk — Ctrl+R reload · Ctrl+S overwrite", buf.file_name()),
+            right,
+        )
     } else if let Some(buf) = &app.buffer {
         let dirty = if buf.modified { "*" } else { "" };
 

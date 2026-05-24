@@ -324,6 +324,33 @@ impl App {
 
             KeyCode::Char('y') if ctrl => buf.redo(),
 
+            // macOS terminals with Option-as-Meta / "Natural Text Editing" send
+            // ESC-b / ESC-f for Option+←/→ (and the upper-case form when Shift is
+            // held). Map them to word motion so Option+arrow works there too.
+            KeyCode::Char('b') if alt => {
+                buf.sel(false);
+
+                buf.move_word_left();
+            }
+
+            KeyCode::Char('B') if alt => {
+                buf.sel(true);
+
+                buf.move_word_left();
+            }
+
+            KeyCode::Char('f') if alt => {
+                buf.sel(false);
+
+                buf.move_word_right();
+            }
+
+            KeyCode::Char('F') if alt => {
+                buf.sel(true);
+
+                buf.move_word_right();
+            }
+
             // Shift+Tab outdents the current line (Tab below indents).
             KeyCode::BackTab => buf.outdent_line(),
 
@@ -693,6 +720,30 @@ mod tests {
 
     fn shift(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+
+    fn alt(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    #[test]
+    fn meta_b_f_jump_by_word() {
+        // What macOS terminals send for Option+←/→ (Option-as-Meta).
+        let mut app = app_with("metaword", "foo bar");
+
+        app.on_key(alt(KeyCode::Char('f')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 3);
+
+        app.on_key(alt(KeyCode::Char('f')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 7);
+
+        app.on_key(alt(KeyCode::Char('b')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 4);
+
+        assert!(!app.buffer.as_ref().unwrap().modified, "meta motion must not type letters");
     }
 
     #[test]

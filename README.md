@@ -70,9 +70,13 @@ select instead of move.
 
 **Commands** — `Ctrl` + a letter, the same everywhere:
 
-| Save | Select all | Copy / Cut / Paste | Undo / Redo | Find | Files | Reload | Quit |
-|------|-----------|--------------------|-------------|------|-------|--------|------|
-| `Ctrl+S` | `Ctrl+A` | `Ctrl+C` `Ctrl+X` `Ctrl+V` | `Ctrl+Z` `Ctrl+Y` | `Ctrl+F` | `Ctrl+B` | `Ctrl+R` | `Ctrl+Q` |
+| Save | Copy / Cut / Paste | Undo / Redo | Find | Files | Reload | Select all | Quit |
+|------|--------------------|-------------|------|-------|--------|-----------|------|
+| `Ctrl+S` | `Ctrl+C` `Ctrl+X` `Ctrl+V` | `Ctrl+Z` `Ctrl+Y` | `Ctrl+F` | `Ctrl+B` | `Ctrl+R` | `Ctrl+Shift+A` | `Ctrl+Q` |
+
+> `Ctrl+A` / `Ctrl+E` are **start / end of line** (the readline keys your terminal
+> sends for `⌘ ←/→`), so *select all* lives on `Ctrl+Shift+A`. If your terminal
+> folds that to `Ctrl+A`, select everything with `Ctrl+Home` then `Ctrl+Shift+End`.
 
 **Move / select** — the only keys that differ by platform are word and line
 motion (see [Terminal setup](#terminal-setup) so they reach the app on macOS):
@@ -83,7 +87,7 @@ motion (see [Terminal setup](#terminal-setup) so they reach the app on macOS):
 | Word                  | `⌥ ←` `⌥ →`         | `Ctrl ←` `Ctrl →`    |
 | Line (up/down)        | `↑` `↓`             | `↑` `↓`             |
 | Block (to blank line) | `⌥ ↑` `⌥ ↓`         | `Ctrl ↑` `Ctrl ↓`   |
-| Start / end of line   | `⌘ ←` `⌘ →`  *or*  `Fn ←` `Fn →` | `Home` `End` |
+| Start / end of line   | `Ctrl+A` `Ctrl+E`  (= `⌘ ←/→` or `Fn ←/→`) | `Ctrl+A` `Ctrl+E`  (or `Home` `End`) |
 | Top / bottom of file  | `⌥ ↑` / `⌥ ↓` (repeat) | `Ctrl Home` `Ctrl End` |
 | Scroll a screen       | `Fn ↑` `Fn ↓`       | `PageUp` `PageDown` |
 

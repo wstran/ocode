@@ -160,8 +160,6 @@ impl App {
 
                 KeyCode::Char('v') => return self.paste(),
 
-                KeyCode::Char('a') => return self.select_all(),
-
                 KeyCode::Char('r') => return self.reload(),
 
                 // Other Ctrl combos (Ctrl+arrows, Ctrl+Z/Y, …) fall through to
@@ -323,6 +321,23 @@ impl App {
             KeyCode::Char('z') | KeyCode::Char('Z') if ctrl => buf.undo(),
 
             KeyCode::Char('y') if ctrl => buf.redo(),
+
+            // Line motion via Ctrl+A / Ctrl+E (readline). This is exactly what
+            // macOS "Natural Text Editing" sends for Cmd+←/→, so those work too.
+            // Upper-case `A` (Ctrl+Shift+A) selects the whole buffer.
+            KeyCode::Char('A') if ctrl => buf.select_all(),
+
+            KeyCode::Char('a') if ctrl => {
+                buf.sel(shift);
+
+                buf.move_home();
+            }
+
+            KeyCode::Char('e') | KeyCode::Char('E') if ctrl => {
+                buf.sel(shift);
+
+                buf.move_end();
+            }
 
             // macOS terminals with Option-as-Meta / "Natural Text Editing" send
             // ESC-b / ESC-f for Option+←/→ (and the upper-case form when Shift is
@@ -568,12 +583,6 @@ impl App {
         }
     }
 
-    fn select_all(&mut self) {
-        if let Some(buf) = self.buffer.as_mut() {
-            buf.select_all();
-        }
-    }
-
     fn set_clipboard(&mut self, text: String) {
         if let Some(cb) = self.clipboard.as_mut() {
             let _ = cb.set_text(text.clone());
@@ -787,10 +796,25 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_a_selects_all() {
-        let mut app = app_with("selectall", "line one\nline two\n");
+    fn ctrl_a_e_are_line_motions() {
+        // Ctrl+A/E = line start/end (what Cmd+←/→ send via Natural Text Editing).
+        let mut app = app_with("linemotion", "hello world");
 
         app.on_key(ctrl(KeyCode::Char('a')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
+
+        app.on_key(ctrl(KeyCode::Char('e')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 11);
+    }
+
+    #[test]
+    fn ctrl_shift_a_selects_all() {
+        let mut app = app_with("selectall", "line one\nline two\n");
+
+        // Ctrl+Shift+A arrives as upper-case 'A'.
+        app.on_key(ctrl(KeyCode::Char('A')));
 
         assert_eq!(
             app.buffer.as_ref().unwrap().selected_text().as_deref(),

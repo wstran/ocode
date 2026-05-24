@@ -314,6 +314,8 @@ impl App {
 
             KeyCode::Backspace => buf.backspace(),
 
+            KeyCode::Delete if nav => buf.delete_word_right(),
+
             KeyCode::Delete => buf.delete(),
 
             // Undo / redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z). macOS terminals do not
@@ -350,6 +352,9 @@ impl App {
 
                 buf.move_word_right();
             }
+
+            // meta-d (Option+Fn+Delete on macOS) deletes the word ahead.
+            KeyCode::Char('d') if alt => buf.delete_word_right(),
 
             // Shift+Tab outdents the current line (Tab below indents).
             KeyCode::BackTab => buf.outdent_line(),
@@ -744,6 +749,22 @@ mod tests {
         assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 4);
 
         assert!(!app.buffer.as_ref().unwrap().modified, "meta motion must not type letters");
+    }
+
+    #[test]
+    fn delete_word_forward_keys() {
+        // meta-d (Option+Fn+Delete) and nav+Delete both delete the word ahead.
+        let mut app = app_with("delfwd1", "foo bar");
+
+        app.on_key(alt(KeyCode::Char('d')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), " bar");
+
+        let mut app2 = app_with("delfwd2", "foo bar");
+
+        app2.on_key(nav(KeyCode::Delete));
+
+        assert_eq!(app2.buffer.as_ref().unwrap().rope.to_string(), " bar");
     }
 
     #[test]

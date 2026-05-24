@@ -768,6 +768,27 @@ impl Buffer {
         }
     }
 
+    /// Delete from the cursor to the end of the word ahead (forward word delete).
+    pub fn delete_word_right(&mut self) {
+        let start = self.cursor_idx();
+
+        let end = self.word_right_from(start);
+
+        if end > start {
+            let line = self.rope.char_to_line(start);
+
+            self.record(EditKind::Other, start, true);
+
+            self.rope.remove(start..end);
+
+            self.hl.invalidate(line);
+
+            self.refresh_modified();
+
+            self.mark_edit(None);
+        }
+    }
+
     /// Jump to the previous blank line (paragraph / block boundary).
     pub fn move_para_up(&mut self) {
         let mut l = self.cursor_line.saturating_sub(1);
@@ -1085,6 +1106,17 @@ mod tests {
         assert_eq!(b.rope.to_string(), "foo ");
 
         assert_eq!(b.cursor_col, 4);
+    }
+
+    #[test]
+    fn delete_word_right_removes_word_ahead() {
+        let mut b = buf("foo bar");
+
+        b.delete_word_right(); // cursor at 0 → removes "foo"
+
+        assert_eq!(b.rope.to_string(), " bar");
+
+        assert_eq!(b.cursor_col, 0);
     }
 
     #[test]

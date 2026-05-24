@@ -395,6 +395,10 @@ impl App {
 
                 self.focus = Focus::Editor;
 
+                // Close the file list so the editor goes full-screen; Ctrl+B
+                // brings it back to pick another file.
+                self.tree_visible = false;
+
                 self.pending_open = None;
 
                 self.clear_flash();
@@ -908,6 +912,31 @@ mod tests {
         app.on_key(plain(KeyCode::Char(' '))); // Space opens the selected file
 
         assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hello");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn opening_a_file_from_tree_hides_it() {
+        let dir = std::env::temp_dir().join("opencode_hidetree_test");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("a.txt"), "hi").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        assert!(app.tree_visible, "a directory launch shows the tree");
+
+        app.on_key(plain(KeyCode::Enter)); // open a.txt
+
+        assert!(!app.tree_visible, "tree closes after opening a file");
+
+        assert!(app.buffer.is_some());
 
         let _ = fs::remove_dir_all(dir);
     }

@@ -114,9 +114,9 @@ moves the cursor and clears the selection. `nav` makes the step bigger.
 | `Enter` / `Space`  | Open a file / toggle a directory    |
 | `Tab`              | Jump to the editor                  |
 
-`Ctrl+B` cycles: editor → open & focus the list → back to the list → hidden.
-Switching files with unsaved edits warns first (`Ctrl+S` to save, or confirm
-again to discard).
+`Ctrl+B` opens the file list and focuses it; **opening a file closes the list**
+for a full-screen editor — press `Ctrl+B` again to pick another. Switching files
+with unsaved edits warns first (`Ctrl+S` to save, or confirm again to discard).
 
 > **MacBook (no Home/End/PageUp keys):** use `Fn + ←/→` for line start/end,
 > `Fn + ↑/↓` to scroll, `Fn + Delete` for forward-delete. Or skip `Fn` entirely:

@@ -228,11 +228,16 @@ impl App {
 
             let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
 
-            self.set_error(if dirty {
-                "Unsaved changes — Esc again to discard and quit".to_string()
+            if dirty {
+                self.set_error("Unsaved changes — Esc again to discard and quit".to_string());
             } else {
-                "Esc again to quit".to_string()
-            });
+                // Nothing to lose: pop the file browser open right away (keeping
+                // focus on the editor so a second Esc still quits) — one key for
+                // "let me pick another file, or bail out".
+                self.tree_visible = true;
+
+                self.set_error("Esc again to quit · Tab to pick a file".to_string());
+            }
 
             return;
         }
@@ -995,6 +1000,44 @@ mod tests {
         app.on_key(plain(KeyCode::Esc)); // confirm → quit
 
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_when_clean_arms_and_opens_file_browser() {
+        let mut app = app_with("escclean", "hello");
+
+        assert!(!app.tree_visible);
+
+        app.on_key(plain(KeyCode::Esc)); // clean → arm quit AND reveal the tree
+
+        assert!(app.esc_confirm);
+
+        assert!(app.tree_visible, "first Esc should open the file browser");
+
+        assert_eq!(app.focus, Focus::Editor, "focus stays so a second Esc quits");
+
+        assert!(!app.should_quit);
+
+        app.on_key(plain(KeyCode::Esc)); // second Esc quits
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_when_dirty_arms_without_opening_browser() {
+        let mut app = app_with("escdirty", "hello");
+
+        app.on_key(plain(KeyCode::Char('x'))); // make an unsaved edit
+
+        assert!(app.buffer.as_ref().unwrap().modified);
+
+        app.on_key(plain(KeyCode::Esc)); // dirty → just warn, no browser
+
+        assert!(app.esc_confirm);
+
+        assert!(!app.tree_visible, "dirty Esc must not pop the browser");
+
+        assert!(!app.should_quit);
     }
 
     #[test]

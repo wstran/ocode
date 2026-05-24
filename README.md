@@ -31,6 +31,9 @@ cargo install --path .        # builds and installs `ocode`
 
 Needs **Rust 1.85+**. Pure-Rust dependencies — no C compiler.
 
+> **Recommended terminal: [Ghostty](https://ghostty.org).** It gives the
+> smoothest keys and inline image preview — see [Ghostty setup](#ghostty-setup).
+
 ## Usage
 
 ```sh
@@ -61,7 +64,7 @@ any motion to select instead of move.
 | `Ctrl+F` | Find |
 | `Ctrl+B` | File browser |
 | `Ctrl+R` | Reload from disk |
-| `Esc` | Step back: clear selection → leave the tree → quit (press twice) |
+| `Esc` | Step back: clear selection → leave tree → open file list & arm quit → quit |
 | `Ctrl+Q` | Quit |
 
 **Move** (add `Shift` to select)
@@ -94,12 +97,13 @@ open · `Tab` to editor. Opening a file gives the editor the full screen.
 
 ## Ghostty setup
 
-opencode is tuned for [**Ghostty**](https://ghostty.org). Two keys need a
-one-time tweak — not an opencode bug, but a limit of how macOS terminals encode
-them. Add this to `~/.config/ghostty/config`, then reload with `⌘⇧,`:
+opencode is built for **[Ghostty](https://ghostty.org) — the recommended
+terminal.** It speaks the kitty graphics protocol (inline images, no setup) and
+lets you fix the two macOS keys that no terminal can send cleanly. Add this to
+`~/.config/ghostty/config`, then reload with `⌘⇧,`:
 
 ```ini
-# ⌘←/→ jump to line start / end.
+# ⌘←/→ → line start / end — i.e. exactly like Fn ←/→ (Home / End).
 # Ghostty sends Ctrl+A / Ctrl+E for these by default, which an app can't tell
 # apart from a real Ctrl+A (Select-all); this remaps them to Home / End.
 keybind = cmd+left=csi:H
@@ -107,11 +111,36 @@ keybind = cmd+right=csi:F
 keybind = shift+cmd+left=csi:1;2H
 keybind = shift+cmd+right=csi:1;2F
 
-# ⌥←/→ jump by word (treat Option as a word key).
+# ⌥←/→ → jump by word.
 macos-option-as-alt = true
 ```
 
-Inline image preview uses Ghostty's kitty graphics protocol — no extra setup.
+So `⌘←/→` ends up doing the same thing as `Fn ←/→`: jump to line start / end
+(add `Shift` to select to there).
+
+### Optional — use ⌥ as the command key
+
+Terminals can't deliver `⌘`+letter shortcuts, so opencode's commands live on
+`Ctrl`. If you'd rather reach for `⌥`+letter, map each to its control byte
+(needs `macos-option-as-alt = true`, above):
+
+```ini
+keybind = alt+s=text:\x13   # ⌥S  save
+keybind = alt+a=text:\x01   # ⌥A  select all
+keybind = alt+c=text:\x03   # ⌥C  copy
+keybind = alt+x=text:\x18   # ⌥X  cut
+keybind = alt+v=text:\x16   # ⌥V  paste
+keybind = alt+z=text:\x1a   # ⌥Z  undo
+keybind = alt+y=text:\x19   # ⌥Y  redo
+keybind = alt+f=text:\x06   # ⌥F  find
+keybind = alt+b=text:\x02   # ⌥B  file browser
+keybind = alt+r=text:\x12   # ⌥R  reload
+keybind = alt+q=text:\x11   # ⌥Q  quit
+```
+
+`⌥←/→` stays word-motion — it rides the arrows, not the letters. (`⌥F`/`⌥B`
+above take those two letters over from their word-jump aliases; `⌥←/→` is
+unaffected.)
 
 > **Other terminals** send modified keys differently, so `⌘←/→` line motion and
 > inline images are Ghostty-only. For word motion elsewhere, enable a meta key:

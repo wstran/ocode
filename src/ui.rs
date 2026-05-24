@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, Focus};
 use crate::buffer::Buffer;
+use crate::media::{self, BinaryDoc, Media};
 
 const TREE_WIDTH: u16 = 32;
 const STATUS_BG: Color = Color::Rgb(40, 44, 52);
@@ -327,6 +328,12 @@ fn centered(width: usize, text: &str, style: Style) -> Line<'static> {
 }
 
 fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.media.is_some() {
+        render_media(frame, app, area);
+
+        return;
+    }
+
     let Some(buf) = app.buffer.as_mut() else {
         render_welcome(frame, area);
 
@@ -398,6 +405,85 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+fn render_media(frame: &mut Frame, app: &mut App, area: Rect) {
+    if matches!(app.media, Some(Media::Image(_))) {
+        // The tree would overlap a kitty image, so hide the image while it is
+        // open and tell the user how to view it.
+        if app.tree_visible {
+            app.image_cells = None;
+
+            let line = Line::from(Span::styled(
+                "  image — press Ctrl+B to hide the tree and view it",
+                Style::default().fg(GUTTER_FG),
+            ));
+
+            frame.render_widget(Paragraph::new(line), area);
+        } else {
+            // Leave the area blank; the run loop paints the image into it.
+            app.image_cells = (area.width > 0 && area.height > 0)
+                .then_some((area.x, area.y, area.width, area.height));
+        }
+
+        return;
+    }
+
+    app.image_cells = None;
+
+    if let Some(Media::Binary(doc)) = &app.media {
+        render_binary_info(frame, doc, area);
+    }
+}
+
+fn render_binary_info(frame: &mut Frame, doc: &BinaryDoc, area: Rect) {
+    let name = doc.path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+
+    let mut lines: Vec<Line> = vec![Line::from("")];
+
+    lines.push(Line::from(Span::styled(
+        format!("  {name}"),
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    )));
+
+    lines.push(Line::from(Span::styled(
+        format!("  {} · {}", doc.format, media::human_size(doc.byte_len)),
+        Style::default().fg(TEXT_FG),
+    )));
+
+    lines.push(Line::from(""));
+
+    lines.push(Line::from(Span::styled(
+        "  Not text — hex preview of the first bytes:",
+        Style::default().fg(GUTTER_FG),
+    )));
+
+    lines.push(Line::from(""));
+
+    for chunk in doc.head.chunks(16) {
+        lines.push(Line::from(Span::styled(hex_line(chunk), Style::default().fg(TEXT_FG))));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn hex_line(chunk: &[u8]) -> String {
+    let mut hex = String::new();
+
+    for (i, b) in chunk.iter().enumerate() {
+        if i == 8 {
+            hex.push(' ');
+        }
+
+        hex.push_str(&format!("{b:02x} "));
+    }
+
+    let ascii: String = chunk
+        .iter()
+        .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+        .collect();
+
+    format!("  {hex:<49}|{ascii}|")
+}
+
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     let conflict = app.search.is_none() && app.buffer.as_ref().is_some_and(|b| b.disk_changed);
 
@@ -444,6 +530,20 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
         let right = format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1);
 
         (left, right)
+    } else if let Some(m) = &app.media {
+        let (path, info) = match m {
+            Media::Image(d) => (
+                d.path.display().to_string(),
+                format!("{} · {}×{} · {}", d.format, d.width, d.height, media::human_size(d.byte_len)),
+            ),
+
+            Media::Binary(d) => (
+                d.path.display().to_string(),
+                format!("{} · {}", d.format, media::human_size(d.byte_len)),
+            ),
+        };
+
+        (format!(" [VIEW] {path}"), format!("{info} "))
     } else {
         let status = if app.status.is_empty() { "opencode" } else { &app.status };
 

@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
+use crate::media::{self, Loaded, Media};
 use crate::tree::FileTree;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -21,6 +22,14 @@ pub struct Search {
 
 pub struct App {
     pub buffer: Option<Buffer>,
+
+    /// A non-text file (image or other binary) open in place of a text buffer;
+    /// `buffer` and `media` are never both `Some`.
+    pub media: Option<Media>,
+
+    /// Cell box (x, y, cols, rows) where the run loop should paint the open
+    /// image; set by the renderer each frame, `None` when no image is shown.
+    pub image_cells: Option<(u16, u16, u16, u16)>,
 
     pub tree: FileTree,
 
@@ -75,16 +84,20 @@ impl App {
 
         let is_dir = path.is_dir();
 
-        let (buffer, tree_root, focus, tree_visible) = if is_dir {
-            (None, path.clone(), Focus::Tree, true)
+        let (buffer, media, tree_root, focus, tree_visible) = if is_dir {
+            (None, None, path.clone(), Focus::Tree, true)
         } else {
-            let syntax = highlighter.syntax_name_for_path(&path);
-
-            let buf = Buffer::open(path.clone(), syntax)?;
-
             let root = buffer::parent_dir(&path);
 
-            (Some(buf), root, Focus::Editor, false)
+            match media::classify(&path)? {
+                Loaded::Text => {
+                    let syntax = highlighter.syntax_name_for_path(&path);
+
+                    (Some(Buffer::open(path.clone(), syntax)?), None, root, Focus::Editor, false)
+                }
+
+                Loaded::Media(m) => (None, Some(m), root, Focus::Editor, false),
+            }
         };
 
         // Use the saved style and skip the picker, unless this is the first run
@@ -103,6 +116,8 @@ impl App {
 
         Ok(Self {
             buffer,
+            media,
+            image_cells: None,
             tree: FileTree::new(tree_root),
             highlighter,
             focus,
@@ -476,24 +491,65 @@ impl App {
     }
 
     fn open_file(&mut self, path: PathBuf) {
-        let syntax = self.highlighter.syntax_name_for_path(&path);
+        let loaded = match media::classify(&path) {
+            Ok(Loaded::Text) => {
+                let syntax = self.highlighter.syntax_name_for_path(&path);
 
-        match Buffer::open(path, syntax) {
-            Ok(buf) => {
-                self.buffer = Some(buf);
+                match Buffer::open(path, syntax) {
+                    Ok(buf) => Some((Some(buf), None)),
 
-                self.focus = Focus::Editor;
+                    Err(e) => {
+                        self.set_error(format!("Error: {e}"));
 
-                // Close the file list so the editor goes full-screen; Ctrl+B
-                // brings it back to pick another file.
-                self.tree_visible = false;
-
-                self.pending_open = None;
-
-                self.clear_flash();
+                        None
+                    }
+                }
             }
 
-            Err(e) => self.set_error(format!("Error: {e}")),
+            Ok(Loaded::Media(m)) => Some((None, Some(m))),
+
+            Err(e) => {
+                self.set_error(format!("Error: {e}"));
+
+                None
+            }
+        };
+
+        let Some((buffer, media)) = loaded else {
+            return;
+        };
+
+        self.buffer = buffer;
+
+        self.media = media;
+
+        self.focus = Focus::Editor;
+
+        // Close the file list so the view goes full-screen; Ctrl+B brings it
+        // back to pick another file.
+        self.tree_visible = false;
+
+        self.pending_open = None;
+
+        self.clear_flash();
+    }
+
+    /// Where the run loop should paint the open image (only when one is shown);
+    /// `None` for text, binaries, or while the tree covers the view.
+    pub fn image_placement(&self) -> Option<(u16, u16, u16, u16)> {
+        match self.media {
+            Some(Media::Image(_)) => self.image_cells,
+
+            _ => None,
+        }
+    }
+
+    /// kitty escape to paint the open image into a `cols`×`rows` cell box.
+    pub fn kitty_image_sequence(&self, cols: u16, rows: u16) -> Vec<u8> {
+        match &self.media {
+            Some(Media::Image(doc)) => doc.kitty_sequence(cols, rows),
+
+            _ => Vec::new(),
         }
     }
 

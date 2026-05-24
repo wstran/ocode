@@ -2,17 +2,19 @@ mod app;
 mod buffer;
 mod config;
 mod highlight;
+mod media;
 mod tree;
 mod ui;
 
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::panic;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::execute;
+use crossterm::{execute, queue};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -55,12 +57,22 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
+    // The cell box of the kitty image currently painted on screen (images are a
+    // separate layer from ratatui's cell buffer, so the loop manages them).
+    let mut shown: Option<(u16, u16, u16, u16)> = None;
+
     loop {
         terminal.draw(|frame| ui::render(frame, app))?;
 
         if app.should_quit {
+            if shown.is_some() {
+                clear_image()?;
+            }
+
             return Ok(());
         }
+
+        sync_image(app, &mut shown)?;
 
         // Block on input, but wake periodically while a file is open (to watch
         // for external changes) or while a flash message is fading.
@@ -76,6 +88,42 @@ fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
             None => read_key(app)?,
         }
     }
+}
+
+/// Paint or remove the kitty image to match what the renderer asked for. Only
+/// acts on a change, so a static image is transmitted once and left alone.
+fn sync_image(app: &App, shown: &mut Option<(u16, u16, u16, u16)>) -> Result<()> {
+    let want = app.image_placement();
+
+    if want == *shown {
+        return Ok(());
+    }
+
+    let mut out = io::stdout();
+
+    out.write_all(media::kitty_delete())?;
+
+    if let Some((x, y, cols, rows)) = want {
+        queue!(out, MoveTo(x, y))?;
+
+        out.write_all(&app.kitty_image_sequence(cols, rows))?;
+    }
+
+    out.flush()?;
+
+    *shown = want;
+
+    Ok(())
+}
+
+fn clear_image() -> Result<()> {
+    let mut out = io::stdout();
+
+    out.write_all(media::kitty_delete())?;
+
+    out.flush()?;
+
+    Ok(())
 }
 
 fn read_key(app: &mut App) -> Result<()> {

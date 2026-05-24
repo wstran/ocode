@@ -18,6 +18,7 @@ code — the only chrome is one status line at the bottom.
 - **Selection & system clipboard** — `Shift`-select, then `Ctrl+C`/`X`/`V`; paste into any app.
 - **Real undo/redo** — word-granular; "unsaved" means the text actually differs from disk.
 - **Watches the file** — auto-reloads external changes when clean, warns when not.
+- **Images & binaries** — views PNG/JPEG/… inline in Ghostty; other binaries show a hex preview, never an error.
 - **15 themes, 79 languages** — live theme preview; add your own `.tmTheme` or `.sublime-syntax`.
 
 ## Install
@@ -45,8 +46,9 @@ ocode --style       # change the color scheme
 
 ## Keyboard
 
-`Ctrl` is the command key (a terminal never delivers `Cmd` to an app). Hold
-**`Shift`** with any motion to select instead of move.
+`Ctrl` is the command key (terminals don't deliver `Cmd` shortcuts to an app;
+`⌘←/→` is wired up via [Ghostty setup](#ghostty-setup)). Hold **`Shift`** with
+any motion to select instead of move.
 
 **Commands**
 
@@ -70,9 +72,11 @@ ocode --style       # change the color scheme
 | Word | `⌥ ←/→` | `Ctrl ←/→` |
 | Line (up/down) | `↑` `↓` | `↑` `↓` |
 | Block (blank line) | `⌥ ↑/↓` | `Ctrl ↑/↓` |
-| Line start / end | `Fn ←/→` (`Home`/`End`) | `Home` `End` |
+| Line start / end | `⌘ ←/→`¹ · `Fn ←/→` (`Home`/`End`) | `Home` `End` |
 | File top / bottom | `Ctrl Home` `Ctrl End` | `Ctrl Home` `Ctrl End` |
 | Scroll a screen | `Fn ↑/↓` | `PageUp` `PageDown` |
+
+¹ `⌘ ←/→` line motion needs the one-time [Ghostty setup](#ghostty-setup) below.
 
 **Edit**
 
@@ -88,14 +92,31 @@ ocode --style       # change the color scheme
 **File tree** (`Ctrl+B`): `↑/↓` move · `→/←` expand/collapse · `Enter`/`Space`
 open · `Tab` to editor. Opening a file gives the editor the full screen.
 
-## Terminal setup (macOS)
+## Ghostty setup
 
-Enable your terminal's meta key, or `Option`+key just inserts accented
-characters instead of reaching opencode (word motion, word delete):
+opencode is tuned for [**Ghostty**](https://ghostty.org). Two keys need a
+one-time tweak — not an opencode bug, but a limit of how macOS terminals encode
+them. Add this to `~/.config/ghostty/config`, then reload with `⌘⇧,`:
 
-- **iTerm2** — Settings → Profiles → Keys → Key Mappings → Presets → **Natural Text Editing**
-- **Terminal.app** — Settings → Profiles → Keyboard → **Use Option as Meta key**
-- **Kitty / WezTerm / Ghostty** — works out of the box
+```ini
+# ⌘←/→ jump to line start / end.
+# Ghostty sends Ctrl+A / Ctrl+E for these by default, which an app can't tell
+# apart from a real Ctrl+A (Select-all); this remaps them to Home / End.
+keybind = cmd+left=csi:H
+keybind = cmd+right=csi:F
+keybind = shift+cmd+left=csi:1;2H
+keybind = shift+cmd+right=csi:1;2F
+
+# ⌥←/→ jump by word (treat Option as a word key).
+macos-option-as-alt = true
+```
+
+Inline image preview uses Ghostty's kitty graphics protocol — no extra setup.
+
+> **Other terminals** send modified keys differently, so `⌘←/→` line motion and
+> inline images are Ghostty-only. For word motion elsewhere, enable a meta key:
+> iTerm2 → *Settings → Profiles → Keys → Presets → Natural Text Editing*;
+> Terminal.app → *Use Option as Meta key*.
 
 ## Styles
 
@@ -107,6 +128,13 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 
 **79 languages** including TOML, `.env`, INI and Dockerfile. Add any
 `.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
+
+## Images & other files
+
+Open an image — PNG, JPEG, GIF, BMP or WebP — and opencode draws it **inline**,
+scaled to fit, using Ghostty's kitty graphics protocol. Any other binary (PDF,
+archives, fonts, …) shows a labelled **hex preview** of its first bytes instead
+of failing to open.
 
 ## Changes on disk
 
@@ -120,5 +148,6 @@ overwriting — `Ctrl+R` to reload, or `Ctrl+S` twice to keep yours.
 `NOTICE` files). Built with [ratatui](https://github.com/ratatui/ratatui),
 [crossterm](https://github.com/crossterm-rs/crossterm),
 [ropey](https://github.com/cessen/ropey),
-[syntect](https://github.com/trishume/syntect) and
-[arboard](https://github.com/1Password/arboard).
+[syntect](https://github.com/trishume/syntect),
+[arboard](https://github.com/1Password/arboard) and
+[image](https://github.com/image-rs/image).

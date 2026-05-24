@@ -128,22 +128,25 @@ Terminals can't deliver `⌘`+letter shortcuts, so opencode's commands live on
 (needs `macos-option-as-alt = true`, above):
 
 ```ini
-keybind = alt+s=text:\x13   # ⌥S  save
-keybind = alt+a=text:\x01   # ⌥A  select all
-keybind = alt+c=text:\x03   # ⌥C  copy
-keybind = alt+x=text:\x18   # ⌥X  cut
-keybind = alt+v=text:\x16   # ⌥V  paste
-keybind = alt+z=text:\x1a   # ⌥Z  undo
-keybind = alt+y=text:\x19   # ⌥Y  redo
-keybind = alt+f=text:\x06   # ⌥F  find
-keybind = alt+b=text:\x02   # ⌥B  file browser
-keybind = alt+r=text:\x12   # ⌥R  reload
-keybind = alt+q=text:\x11   # ⌥Q  quit
+# save · select-all · copy · cut · paste · undo · redo · find · browser ·
+# reload · quit  (Ghostty has no same-line comments, so keep them above)
+keybind = alt+s=text:\x13
+keybind = alt+a=text:\x01
+keybind = alt+c=text:\x03
+keybind = alt+x=text:\x18
+keybind = alt+v=text:\x16
+keybind = alt+z=text:\x1a
+keybind = alt+y=text:\x19
+keybind = alt+f=text:\x06
+keybind = alt+b=text:\x02
+keybind = alt+r=text:\x12
+keybind = alt+q=text:\x11
 ```
 
 `⌥←/→` stays word-motion — it rides the arrows, not the letters. (`⌥F`/`⌥B`
 above take those two letters over from their word-jump aliases; `⌥←/→` is
-unaffected.)
+unaffected.) **Ghostty has no inline comments** — a `#` must be on its own
+line, or it becomes part of the keybind.
 
 > **Other terminals** send modified keys differently, so `⌘←/→` line motion and
 > inline images are Ghostty-only. For word motion elsewhere, enable a meta key:

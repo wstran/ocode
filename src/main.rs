@@ -28,6 +28,8 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 /// Recommended Ghostty config for opencode, printed by `ocode --ghostty-config`.
 /// Kept here so the setup travels with the binary: reinstall years later, run
 /// the flag, and the keys are documented again. Mirrors the README.
+// NB: Ghostty has no same-line comments (issue #3350) — every `#` must be on
+// its own line, or the rest of the line becomes part of the keybind value.
 const GHOSTTY_CONFIG: &str = "\
 # opencode — recommended Ghostty config. Append to ~/.config/ghostty/config
 # and reload with Cmd+Shift+, (these keys can't be handled inside the app).
@@ -44,17 +46,19 @@ macos-option-as-alt = true
 
 # Optional: Option+letter as the command key (mirrors opencode's Ctrl keys).
 # Option+Left/Right stays word-motion — it rides the arrows, not these letters.
-keybind = alt+s=text:\\x13   # save
-keybind = alt+a=text:\\x01   # select all
-keybind = alt+c=text:\\x03   # copy
-keybind = alt+x=text:\\x18   # cut
-keybind = alt+v=text:\\x16   # paste
-keybind = alt+z=text:\\x1a   # undo
-keybind = alt+y=text:\\x19   # redo
-keybind = alt+f=text:\\x06   # find
-keybind = alt+b=text:\\x02   # file browser
-keybind = alt+r=text:\\x12   # reload
-keybind = alt+q=text:\\x11   # quit
+# In order: save, select-all, copy, cut, paste, undo, redo, find, browser,
+# reload, quit.
+keybind = alt+s=text:\\x13
+keybind = alt+a=text:\\x01
+keybind = alt+c=text:\\x03
+keybind = alt+x=text:\\x18
+keybind = alt+v=text:\\x16
+keybind = alt+z=text:\\x1a
+keybind = alt+y=text:\\x19
+keybind = alt+f=text:\\x06
+keybind = alt+b=text:\\x02
+keybind = alt+r=text:\\x12
+keybind = alt+q=text:\\x11
 ";
 
 /// opencode — a fast terminal code reader & editor.

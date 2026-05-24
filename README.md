@@ -59,6 +59,7 @@ ocode --style       # change the color scheme
 | `Ctrl+F` | Find |
 | `Ctrl+B` | File browser |
 | `Ctrl+R` | Reload from disk |
+| `Esc` | Step back: clear selection → leave the tree → quit (press twice) |
 | `Ctrl+Q` | Quit |
 
 **Move** (add `Shift` to select)

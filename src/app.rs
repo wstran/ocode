@@ -8,7 +8,7 @@ use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
 use crate::tree::FileTree;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum Focus {
     Tree,
 
@@ -49,6 +49,9 @@ pub struct App {
     /// Set after a refused save when the file changed on disk; a second Ctrl+S
     /// then overwrites it.
     pub overwrite_confirm: bool,
+
+    /// Set when Esc has nothing left to cancel; a second Esc then quits.
+    pub esc_confirm: bool,
 
     /// A file the user asked to open while the current buffer has unsaved edits;
     /// opening it again confirms discarding those edits.
@@ -111,6 +114,7 @@ impl App {
             status_ok: false,
             quit_confirm: false,
             overwrite_confirm: false,
+            esc_confirm: false,
             pending_open: None,
             should_quit: false,
             page_rows: 1,
@@ -136,6 +140,10 @@ impl App {
 
         if !(ctrl && key.code == KeyCode::Char('s')) {
             self.overwrite_confirm = false;
+        }
+
+        if key.code != KeyCode::Esc {
+            self.esc_confirm = false;
         }
 
         if self.search.is_some() {
@@ -170,11 +178,51 @@ impl App {
             }
         }
 
+        // Esc peels back one layer at a time, then quits (search is handled
+        // above): selection → file tree → quit (confirmed with a second Esc).
+        if key.code == KeyCode::Esc {
+            self.handle_escape();
+
+            return;
+        }
+
         match self.focus {
             Focus::Tree => self.on_tree_key(key),
 
             Focus::Editor => self.on_editor_key(key),
         }
+    }
+
+    fn handle_escape(&mut self) {
+        if let Some(buf) = self.buffer.as_mut() {
+            if buf.selection().is_some() {
+                buf.clear_selection();
+
+                return;
+            }
+        }
+
+        if self.focus == Focus::Tree {
+            self.focus = Focus::Editor;
+
+            return;
+        }
+
+        if !self.esc_confirm {
+            self.esc_confirm = true;
+
+            let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
+
+            self.set_error(if dirty {
+                "Unsaved changes — Esc again to discard and quit".to_string()
+            } else {
+                "Esc again to quit".to_string()
+            });
+
+            return;
+        }
+
+        self.should_quit = true;
     }
 
     fn on_picker_key(&mut self, key: KeyEvent, ctrl: bool) {
@@ -305,8 +353,6 @@ impl App {
 
                 buf.page(self.page_rows as isize);
             }
-
-            KeyCode::Esc => buf.clear_selection(),
 
             KeyCode::Enter => buf.insert_newline(),
 
@@ -872,6 +918,69 @@ mod tests {
         app.on_key(ctrl(KeyCode::Char('q')));
 
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_clears_selection_then_quits_on_second_press() {
+        let mut app = app_with("esc", "hello");
+
+        app.on_key(shift(KeyCode::Right)); // make a selection
+
+        app.on_key(plain(KeyCode::Esc)); // peels off the selection
+
+        assert!(app.buffer.as_ref().unwrap().selection().is_none());
+
+        assert!(!app.should_quit);
+
+        app.on_key(plain(KeyCode::Esc)); // nothing left → arm quit
+
+        assert!(app.esc_confirm && !app.should_quit);
+
+        app.on_key(plain(KeyCode::Esc)); // confirm → quit
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_quit_arming_resets_on_another_key() {
+        let mut app = app_with("escreset", "hi");
+
+        app.on_key(plain(KeyCode::Esc)); // arm
+
+        assert!(app.esc_confirm);
+
+        app.on_key(plain(KeyCode::Right)); // any other key cancels the arming
+
+        assert!(!app.esc_confirm);
+
+        app.on_key(plain(KeyCode::Esc)); // arms again, does not quit
+
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn esc_in_tree_returns_to_editor() {
+        let dir = std::env::temp_dir().join("opencode_esc_tree");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("a.txt"), "x").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        assert_eq!(app.focus, Focus::Tree);
+
+        app.on_key(plain(KeyCode::Esc)); // leaves the tree, no quit
+
+        assert_eq!(app.focus, Focus::Editor);
+
+        assert!(!app.should_quit);
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

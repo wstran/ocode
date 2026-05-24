@@ -39,8 +39,9 @@ Needs **Rust 1.85+**. Pure-Rust dependencies — no C compiler.
 ```sh
 ocode               # browse the current directory
 ocode src/main.rs   # open a file
-ocode ./project     # open a directory (file tree)
-ocode --style       # change the color scheme
+ocode ./project       # open a directory (file tree)
+ocode --style         # change the color scheme
+ocode --ghostty-config # print the recommended Ghostty config (below)
 ```
 
 <p align="center">
@@ -99,8 +100,10 @@ open · `Tab` to editor. Opening a file gives the editor the full screen.
 
 opencode is built for **[Ghostty](https://ghostty.org) — the recommended
 terminal.** It speaks the kitty graphics protocol (inline images, no setup) and
-lets you fix the two macOS keys that no terminal can send cleanly. Add this to
-`~/.config/ghostty/config`, then reload with `⌘⇧,`:
+lets you fix the two macOS keys that no terminal can send cleanly. Add the block
+below to `~/.config/ghostty/config` and reload with `⌘⇧,` — or run **`ocode
+--ghostty-config`** to print it (it ships in the binary, so it's there again
+after any reinstall, no need to remember it):
 
 ```ini
 # ⌘←/→ → line start / end — i.e. exactly like Fn ←/→ (Home / End).

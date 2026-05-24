@@ -60,6 +60,11 @@ ocode --style       # (-s) re-open the style picker and save a new scheme
 
 On first run a **style picker** opens (live preview; `↑/↓`, then `Enter`). Your
 choice is saved to `~/.config/opencode/config`, so later runs go straight in.
+With no file open, opencode shows a welcome screen:
+
+<p align="center">
+  <img src="docs/welcome.png" alt="opencode welcome screen" width="660">
+</p>
 
 ## Keyboard
 
@@ -83,7 +88,7 @@ motion (see [Terminal setup](#terminal-setup) so they reach the app on macOS):
 | Word                  | `⌥ ←` `⌥ →`         | `Ctrl ←` `Ctrl →`    |
 | Line (up/down)        | `↑` `↓`             | `↑` `↓`             |
 | Block (to blank line) | `⌥ ↑` `⌥ ↓`         | `Ctrl ↑` `Ctrl ↓`   |
-| Start / end of line   | `⌘ ←` `⌘ →`  *or*  `Fn ←` `Fn →` | `Home` `End` |
+| Start / end of line   | `Fn ←` `Fn →` (= `Home`/`End`) | `Home` `End` |
 | Top / bottom of file  | `⌥ ↑` / `⌥ ↓` (repeat) | `Ctrl Home` `Ctrl End` |
 | Scroll a screen       | `Fn ↑` `Fn ↓`       | `PageUp` `PageDown` |
 
@@ -99,10 +104,8 @@ editor — `Ctrl+B` again to pick another.
 
 ## Terminal setup
 
-> **macOS users — do this once**, or `⌥`/`⌘` motions won't reach opencode.
-
-A terminal decides what `Option` and `Cmd` send. Enable its text-editing preset
-so `⌥ ←/→` (word) and `⌘ ←/→` (line start/end) are delivered as real keys:
+> **macOS:** enable your terminal's meta key, or `Option+←/→` (word motion) just
+> inserts accented characters instead of reaching opencode.
 
 | Terminal | Setting |
 |----------|---------|
@@ -110,9 +113,8 @@ so `⌥ ←/→` (word) and `⌘ ←/→` (line start/end) are delivered as real
 | **Terminal.app** | Settings → Profiles → Keyboard → **Use Option as Meta key** |
 | **Kitty / WezTerm / Ghostty** | works out of the box |
 
-With that on, `⌘ ←/→` become start/end of line and `⌥ ←/→` jump by word — the
-native macOS feel, no `Fn` needed. (Windows/Linux terminals send `Ctrl`+arrow
-and `Home`/`End` directly.)
+With that on, `Option+←/→` jump by word. (Windows/Linux terminals send
+`Ctrl+←/→` and `Home`/`End` directly — nothing to configure.)
 
 ## Styles
 
@@ -124,10 +126,6 @@ each `dark` / `light` to match your terminal.
 plus **Dracula, One Dark, One Half Dark/Light, Coldark Dark/Cold, Sublime
 Snazzy, Two Dark**. Add more by dropping a `.tmTheme` into
 `~/.config/opencode/themes/`.
-
-<p align="center">
-  <img src="docs/welcome.png" alt="opencode welcome screen" width="660">
-</p>
 
 ## Languages
 

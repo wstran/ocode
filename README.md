@@ -31,17 +31,13 @@ cargo install --path .        # builds and installs `ocode`
 
 Needs **Rust 1.85+**. Pure-Rust dependencies — no C compiler.
 
-> **Recommended terminal: [Ghostty](https://ghostty.org).** It gives the
-> smoothest keys and inline image preview — see [Ghostty setup](#ghostty-setup).
-
 ## Usage
 
 ```sh
 ocode               # browse the current directory
 ocode src/main.rs   # open a file
-ocode ./project       # open a directory (file tree)
-ocode --style         # change the color scheme
-ocode --ghostty-config # print the recommended Ghostty config (below)
+ocode ./project     # open a directory (file tree)
+ocode --style       # change the color scheme
 ```
 
 <p align="center">
@@ -50,9 +46,8 @@ ocode --ghostty-config # print the recommended Ghostty config (below)
 
 ## Keyboard
 
-`Ctrl` is the command key (terminals don't deliver `Cmd` shortcuts to an app;
-`⌘←/→` is wired up via [Ghostty setup](#ghostty-setup)). Hold **`Shift`** with
-any motion to select instead of move.
+`Ctrl` is the command key (a terminal never delivers `Cmd` to an app). Hold
+**`Shift`** with any motion to select instead of move.
 
 **Commands**
 
@@ -76,11 +71,9 @@ any motion to select instead of move.
 | Word | `⌥ ←/→` | `Ctrl ←/→` |
 | Line (up/down) | `↑` `↓` | `↑` `↓` |
 | Block (blank line) | `⌥ ↑/↓` | `Ctrl ↑/↓` |
-| Line start / end | `⌘ ←/→`¹ · `Fn ←/→` (`Home`/`End`) | `Home` `End` |
+| Line start / end | `Fn ←/→` (`Home`/`End`) | `Home` `End` |
 | File top / bottom | `Ctrl Home` `Ctrl End` | `Ctrl Home` `Ctrl End` |
 | Scroll a screen | `Fn ↑/↓` | `PageUp` `PageDown` |
-
-¹ `⌘ ←/→` line motion needs the one-time [Ghostty setup](#ghostty-setup) below.
 
 **Edit**
 
@@ -96,63 +89,17 @@ any motion to select instead of move.
 **File tree** (`Ctrl+B`): `↑/↓` move · `→/←` expand/collapse · `Enter`/`Space`
 open · `Tab` to editor. Opening a file gives the editor the full screen.
 
-## Ghostty setup
+## Terminal setup (macOS)
 
-opencode is built for **[Ghostty](https://ghostty.org) — the recommended
-terminal.** It speaks the kitty graphics protocol (inline images, no setup) and
-lets you fix the two macOS keys that no terminal can send cleanly. Open your
-Ghostty config with **`⌘,`** (its real path differs per OS — on macOS it lives
-under *Application Support*, not `~/.config`), paste in the block below, and
-reload with `⌘⇧,`. Run **`ocode --ghostty-config`** to print it — it ships in
-the binary, so it's there again after any reinstall, no need to remember it:
+For word motion (`⌥ ←/→`) and word delete, enable your terminal's meta key —
+otherwise `⌥`+key just inserts accented characters:
 
-```ini
-# ⌘←/→ → line start / end — i.e. exactly like Fn ←/→ (Home / End).
-# Ghostty sends Ctrl+A / Ctrl+E for these by default, which an app can't tell
-# apart from a real Ctrl+A (Select-all); this remaps them to Home / End.
-keybind = cmd+left=csi:H
-keybind = cmd+right=csi:F
-keybind = shift+cmd+left=csi:1;2H
-keybind = shift+cmd+right=csi:1;2F
+- **iTerm2** — Settings → Profiles → Keys → Presets → **Natural Text Editing**
+- **Terminal.app** — Settings → Profiles → Keyboard → **Use Option as Meta key**
+- **Ghostty / Kitty / WezTerm** — works out of the box
 
-# ⌥←/→ → jump by word.
-macos-option-as-alt = true
-```
-
-So `⌘←/→` ends up doing the same thing as `Fn ←/→`: jump to line start / end
-(add `Shift` to select to there).
-
-### Optional — use ⌥ as the command key
-
-Terminals can't deliver `⌘`+letter shortcuts, so opencode's commands live on
-`Ctrl`. If you'd rather reach for `⌥`+letter, map each to its control byte
-(needs `macos-option-as-alt = true`, above):
-
-```ini
-# save · select-all · copy · cut · paste · undo · redo · find · browser ·
-# reload · quit  (Ghostty has no same-line comments, so keep them above)
-keybind = alt+s=text:\x13
-keybind = alt+a=text:\x01
-keybind = alt+c=text:\x03
-keybind = alt+x=text:\x18
-keybind = alt+v=text:\x16
-keybind = alt+z=text:\x1a
-keybind = alt+y=text:\x19
-keybind = alt+f=text:\x06
-keybind = alt+b=text:\x02
-keybind = alt+r=text:\x12
-keybind = alt+q=text:\x11
-```
-
-`⌥←/→` stays word-motion — it rides the arrows, not the letters. (`⌥F`/`⌥B`
-above take those two letters over from their word-jump aliases; `⌥←/→` is
-unaffected.) **Ghostty has no inline comments** — a `#` must be on its own
-line, or it becomes part of the keybind.
-
-> **Other terminals** send modified keys differently, so `⌘←/→` line motion and
-> inline images are Ghostty-only. For word motion elsewhere, enable a meta key:
-> iTerm2 → *Settings → Profiles → Keys → Presets → Natural Text Editing*;
-> Terminal.app → *Use Option as Meta key*.
+Inline image preview needs a terminal that speaks the **kitty graphics
+protocol** (Ghostty, Kitty).
 
 ## Styles
 
@@ -168,9 +115,9 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 ## Images & other files
 
 Open an image — PNG, JPEG, GIF, BMP or WebP — and opencode draws it **inline**,
-scaled to fit, using Ghostty's kitty graphics protocol. Any other binary (PDF,
-archives, fonts, …) shows a labelled **hex preview** of its first bytes instead
-of failing to open.
+scaled to fit, via the kitty graphics protocol (Ghostty, Kitty). Any other
+binary (PDF, archives, fonts, …) shows a labelled **hex preview** of its first
+bytes instead of failing to open.
 
 ## Changes on disk
 

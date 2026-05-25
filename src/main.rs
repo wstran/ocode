@@ -25,43 +25,6 @@ use crate::app::App;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-/// Recommended Ghostty config for opencode, printed by `ocode --ghostty-config`.
-/// Kept here so the setup travels with the binary: reinstall years later, run
-/// the flag, and the keys are documented again. Mirrors the README.
-// NB: Ghostty has no same-line comments (issue #3350) — every `#` must be on
-// its own line, or the rest of the line becomes part of the keybind value.
-const GHOSTTY_CONFIG: &str = "\
-# opencode — recommended Ghostty config. Open Ghostty's config with Cmd+,
-# (its real path differs per OS; on macOS it's under Application Support, not
-# ~/.config), paste these in, then reload with Cmd+Shift+,.
-
-# Cmd+Left / Cmd+Right -> line start / end (same as Fn+Left/Right = Home/End).
-# Ghostty sends Ctrl+A / Ctrl+E here by default, which collides with Select-all.
-keybind = cmd+left=csi:H
-keybind = cmd+right=csi:F
-keybind = shift+cmd+left=csi:1;2H
-keybind = shift+cmd+right=csi:1;2F
-
-# Option+Left / Option+Right -> jump by word.
-macos-option-as-alt = true
-
-# Optional: Option+letter as the command key (mirrors opencode's Ctrl keys).
-# Option+Left/Right stays word-motion — it rides the arrows, not these letters.
-# In order: save, select-all, copy, cut, paste, undo, redo, find, browser,
-# reload, quit.
-keybind = alt+s=text:\\x13
-keybind = alt+a=text:\\x01
-keybind = alt+c=text:\\x03
-keybind = alt+x=text:\\x18
-keybind = alt+v=text:\\x16
-keybind = alt+z=text:\\x1a
-keybind = alt+y=text:\\x19
-keybind = alt+f=text:\\x06
-keybind = alt+b=text:\\x02
-keybind = alt+r=text:\\x12
-keybind = alt+q=text:\\x11
-";
-
 /// opencode — a fast terminal code reader & editor.
 #[derive(Parser)]
 #[command(name = "ocode", version, about)]
@@ -73,20 +36,10 @@ struct Cli {
     /// Re-open the style picker to choose and save a different color scheme.
     #[arg(short = 's', long = "style")]
     style: bool,
-
-    /// Print the recommended Ghostty config (keys + inline images) and exit.
-    #[arg(long = "ghostty-config")]
-    ghostty_config: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-
-    if cli.ghostty_config {
-        print!("{GHOSTTY_CONFIG}");
-
-        return Ok(());
-    }
 
     if !cli.path.exists() {
         anyhow::bail!("path does not exist: {}", cli.path.display());
@@ -219,21 +172,4 @@ fn install_panic_hook() {
 
         hook(info);
     }));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GHOSTTY_CONFIG;
-
-    #[test]
-    fn ghostty_config_carries_the_essential_keys() {
-        for needle in [
-            "keybind = cmd+left=csi:H",
-            "keybind = cmd+right=csi:F",
-            "macos-option-as-alt = true",
-            "alt+s=text:\\x13",
-        ] {
-            assert!(GHOSTTY_CONFIG.contains(needle), "missing: {needle}");
-        }
-    }
 }

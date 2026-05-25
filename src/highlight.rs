@@ -73,7 +73,7 @@ impl SyntaxHighlighter {
             load_user_themes(&dir, &mut themes);
         }
 
-        themes.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        themes.sort_by_key(|t| t.0.to_lowercase());
 
         let current = themes
             .iter()

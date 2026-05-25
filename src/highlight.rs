@@ -26,13 +26,28 @@ const BUNDLED: &[(&str, &str)] = &[
 ];
 
 /// Extra language grammars bundled on top of syntect's 75 defaults. TOML is the
-/// upstream MIT grammar; the rest are minimal grammars authored for opencode.
+/// upstream MIT grammar; the rest are minimal grammars authored for opencode
+/// (the default Sublime set predates these modern languages).
 const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/TOML.sublime-syntax"),
     include_str!("../assets/syntaxes/DotENV.sublime-syntax"),
     include_str!("../assets/syntaxes/INI.sublime-syntax"),
     include_str!("../assets/syntaxes/Dockerfile.sublime-syntax"),
+    include_str!("../assets/syntaxes/TypeScript.sublime-syntax"),
+    include_str!("../assets/syntaxes/Solidity.sublime-syntax"),
+    include_str!("../assets/syntaxes/Move.sublime-syntax"),
+    include_str!("../assets/syntaxes/Noir.sublime-syntax"),
 ];
+
+/// Variant extensions of a language syntect knows under a different one — mapped
+/// to that base so `.mjs`/`.cjs`/`.jsx` light up as JavaScript.
+fn alias_extension(ext: &str) -> Option<&'static str> {
+    match ext {
+        "mjs" | "cjs" | "jsx" => Some("js"),
+
+        _ => None,
+    }
+}
 
 /// Owns the immutable syntect resources (syntax definitions + the bundled
 /// themes) shared by every buffer. The active theme is selectable at startup.
@@ -170,9 +185,17 @@ impl SyntaxHighlighter {
             .and_then(|n| n.strip_prefix('.'))
             .and_then(|n| self.syntax_set.find_syntax_by_extension(n));
 
+        // Variant extensions (.mjs/.cjs/.jsx) reuse the base language's syntax.
+        let by_alias = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(alias_extension)
+            .and_then(|base| self.syntax_set.find_syntax_by_extension(base));
+
         by_ext
             .or(by_name)
             .or(by_dotfile)
+            .or(by_alias)
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
             .name
             .clone()
@@ -314,6 +337,47 @@ mod tests {
         assert_eq!(h.syntax_name_for_path(Path::new("data.json")), "JSON");
 
         assert_eq!(h.syntax_name_for_path(Path::new("conf.yaml")), "YAML");
+    }
+
+    #[test]
+    fn resolves_modern_languages_and_variants() {
+        let h = SyntaxHighlighter::new();
+
+        for (file, want) in [
+            ("app.ts", "TypeScript"),
+            ("App.tsx", "TypeScript"),
+            ("mod.mts", "TypeScript"),
+            ("mod.cts", "TypeScript"),
+            ("Token.sol", "Solidity"),
+            ("coin.move", "Move"),
+            ("main.nr", "Noir"),
+            // JS variants alias onto the built-in JavaScript grammar.
+            ("server.mjs", "JavaScript"),
+            ("config.cjs", "JavaScript"),
+            ("App.jsx", "JavaScript"),
+        ] {
+            assert_eq!(h.syntax_name_for_path(Path::new(file)), want, "for {file}");
+        }
+    }
+
+    #[test]
+    fn modern_grammars_highlight_without_error() {
+        let h = SyntaxHighlighter::new();
+
+        // Each minimal grammar must load and produce >1 styled span (i.e. it
+        // actually tokenised, not fell back to one plain-text run).
+        for (code, ext) in [
+            ("const x: number = 1; // hi\n", "ts"),
+            ("contract C { uint256 public x; }\n", "sol"),
+            ("module m::a { fun f() { let x = 1; } }\n", "move"),
+            ("fn main() { let x: Field = 1; }\n", "nr"),
+        ] {
+            let spans = h.highlight_block(code, ext, h.current);
+
+            let count: usize = spans.iter().map(|l| l.len()).sum();
+
+            assert!(count > 1, "grammar for .{ext} did not tokenise ({count} spans)");
+        }
     }
 }
 

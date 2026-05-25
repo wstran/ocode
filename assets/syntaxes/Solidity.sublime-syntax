@@ -1,0 +1,56 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Solidity highlighting.
+name: Solidity
+file_extensions:
+  - sol
+scope: source.solidity
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.solidity
+    - match: '/\*'
+      scope: punctuation.definition.comment.solidity
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.solidity
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.solidity
+      push: single_string
+    - match: '\bpragma\b'
+      scope: keyword.control.directive.solidity
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.solidity
+    - match: '\b(true|false|wei|gwei|ether|seconds|minutes|hours|days|weeks)\b'
+      scope: constant.language.solidity
+    - match: '\b(msg|block|tx|abi|this|super|now)\b'
+      scope: variable.language.solidity
+    - match: '\b(contract|interface|library|abstract|function|modifier|event|error|struct|enum|mapping|using|is|import|as|new|return|returns|if|else|for|while|do|break|continue|emit|require|revert|assert|try|catch|delete|constructor|receive|fallback|unchecked|assembly|constant|immutable|override|virtual)\b'
+      scope: keyword.control.solidity
+    - match: '\b(public|private|internal|external|view|pure|payable|memory|storage|calldata|indexed|anonymous)\b'
+      scope: storage.modifier.solidity
+    - match: '\b(address|bool|string|byte|bytes\d*|u?int\d*|u?fixed\d*|mapping)\b'
+      scope: storage.type.solidity
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.solidity
+      pop: true
+    - match: '.'
+      scope: comment.block.solidity
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.solidity
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.solidity
+    - match: '.'
+      scope: string.quoted.double.solidity
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.solidity
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.solidity
+    - match: '.'
+      scope: string.quoted.single.solidity

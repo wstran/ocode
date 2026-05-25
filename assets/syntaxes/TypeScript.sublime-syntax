@@ -1,0 +1,70 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal TypeScript / TSX highlighting:
+# keywords, types, strings (incl. template literals), comments, numbers,
+# decorators. Not a full grammar — enough to read code comfortably.
+name: TypeScript
+file_extensions:
+  - ts
+  - tsx
+  - mts
+  - cts
+scope: source.ts
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.ts
+    - match: '/\*'
+      scope: punctuation.definition.comment.ts
+      push: block_comment
+    - match: '`'
+      scope: punctuation.definition.string.begin.ts
+      push: template_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.ts
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.ts
+      push: single_string
+    - match: '@[A-Za-z_$][A-Za-z0-9_$]*'
+      scope: variable.annotation.ts
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?n?)\b'
+      scope: constant.numeric.ts
+    - match: '\b(true|false|null|undefined|NaN|Infinity)\b'
+      scope: constant.language.ts
+    - match: '\b(this|super)\b'
+      scope: variable.language.ts
+    - match: '\b(abstract|as|async|await|break|case|catch|class|const|continue|debugger|declare|default|delete|do|else|enum|export|extends|finally|for|from|function|get|if|implements|import|in|infer|instanceof|interface|is|keyof|let|module|namespace|new|of|override|package|private|protected|public|readonly|return|satisfies|set|static|switch|throw|try|type|typeof|var|void|while|with|yield)\b'
+      scope: keyword.control.ts
+    - match: '\b(any|bigint|boolean|never|number|object|string|symbol|unknown|void)\b'
+      scope: storage.type.ts
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.ts
+      pop: true
+    - match: '.'
+      scope: comment.block.ts
+  template_string:
+    - match: '`'
+      scope: punctuation.definition.string.end.ts
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.ts
+    - match: '.'
+      scope: string.quoted.other.ts
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.ts
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.ts
+    - match: '.'
+      scope: string.quoted.double.ts
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.ts
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.ts
+    - match: '.'
+      scope: string.quoted.single.ts

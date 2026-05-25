@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Noir (Aztec ZK) highlighting — Rust-like.
+name: Noir
+file_extensions:
+  - nr
+scope: source.noir
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.noir
+    - match: '/\*'
+      scope: punctuation.definition.comment.noir
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.noir
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)\b'
+      scope: constant.numeric.noir
+    - match: '\b(true|false)\b'
+      scope: constant.language.noir
+    - match: '\bSelf\b'
+      scope: variable.language.noir
+    - match: '\b(fn|let|mut|pub|struct|impl|trait|use|mod|if|else|for|in|while|return|constrain|assert|assert_eq|comptime|global|contract|unconstrained|as|crate|dep|self|where|type|enum|match|continue|break|quote|unquote)\b'
+      scope: keyword.control.noir
+    - match: '\b(Field|bool|str|String|u1|u8|u16|u32|u64|u128|i8|i16|i32|i64)\b'
+      scope: storage.type.noir
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.noir
+      pop: true
+    - match: '.'
+      scope: comment.block.noir
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.noir
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.noir
+    - match: '.'
+      scope: string.quoted.double.noir

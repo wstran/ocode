@@ -1,0 +1,43 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Move (Aptos/Sui) highlighting.
+name: Move
+file_extensions:
+  - move
+scope: source.move
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.move
+    - match: '/\*'
+      scope: punctuation.definition.comment.move
+      push: block_comment
+    - match: '[bx]?"'
+      scope: punctuation.definition.string.begin.move
+      push: double_string
+    - match: '@(0x[0-9a-fA-F]+|[A-Za-z_][A-Za-z0-9_]*)'
+      scope: constant.other.address.move
+    - match: '\b(0x[0-9a-fA-F_]+|\d[\d_]*)(u8|u16|u32|u64|u128|u256)?\b'
+      scope: constant.numeric.move
+    - match: '\b(true|false)\b'
+      scope: constant.language.move
+    - match: '\b(module|script|fun|public|entry|native|friend|use|as|struct|has|let|mut|move|copy|return|if|else|while|loop|break|continue|abort|acquires|spec|const|invariant|assume|assert|ensures|requires|aborts_if|phantom|enum|match)\b'
+      scope: keyword.control.move
+    - match: '\b(key|store|drop|copy)\b'
+      scope: storage.modifier.move
+    - match: '\b(u8|u16|u32|u64|u128|u256|bool|address|signer|vector)\b'
+      scope: storage.type.move
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.move
+      pop: true
+    - match: '.'
+      scope: comment.block.move
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.move
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.move
+    - match: '.'
+      scope: string.quoted.double.move

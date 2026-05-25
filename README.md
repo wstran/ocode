@@ -19,7 +19,7 @@ code — the only chrome is one status line at the bottom.
 - **Real undo/redo** — word-granular; "unsaved" means the text actually differs from disk.
 - **Watches the file** — auto-reloads external changes when clean, warns when not.
 - **Images & binaries** — views PNG/JPEG/… inline in Ghostty; other binaries show a hex preview, never an error.
-- **15 themes, 79 languages** — live theme preview; add your own `.tmTheme` or `.sublime-syntax`.
+- **15 themes, 83 languages** — incl. TypeScript, Solidity, Move, Noir; add your own `.tmTheme` or `.sublime-syntax`.
 
 ## Install
 
@@ -109,7 +109,9 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 
 ## Languages
 
-**79 languages** including TOML, `.env`, INI and Dockerfile. Add any
+**83 languages** out of the box — including **TypeScript** (`.ts` `.tsx` `.mts`
+`.cts`), **Solidity**, **Move** and **Noir**, plus TOML, `.env`, INI and
+Dockerfile. `.mjs`, `.cjs` and `.jsx` highlight as JavaScript. Add any
 `.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
 
 ## Images & other files

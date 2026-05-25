@@ -9,6 +9,12 @@ opencode ships syntect's 75 default grammars plus these extras:
   DotENV      — authored for opencode (MIT). Minimal .env grammar.
   INI         — authored for opencode (MIT). Sections / key=value / comments.
   Dockerfile  — authored for opencode (MIT). Instructions / strings / vars.
+  TypeScript  — authored for opencode (MIT). .ts/.tsx/.mts/.cts.
+  Solidity    — authored for opencode (MIT). .sol.
+  Move        — authored for opencode (MIT). .move (Aptos/Sui).
+  Noir        — authored for opencode (MIT). .nr (Aztec).
+
+`.mjs`, `.cjs` and `.jsx` are aliased to the built-in JavaScript grammar.
 
 Add your own: drop a `.sublime-syntax` file into
   ~/.config/opencode/syntaxes/   (or $XDG_CONFIG_HOME/opencode/syntaxes/)

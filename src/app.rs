@@ -217,32 +217,36 @@ impl App {
             }
         }
 
+        // A second Esc in a row confirms the quit, wherever focus landed (the
+        // arming Esc below may have moved it into the freshly-opened tree).
+        if self.esc_confirm {
+            self.should_quit = true;
+
+            return;
+        }
+
         if self.focus == Focus::Tree {
             self.focus = Focus::Editor;
 
             return;
         }
 
-        if !self.esc_confirm {
-            self.esc_confirm = true;
+        // Editor, nothing to cancel: arm the quit. When clean, also pop the file
+        // browser open AND focus it, so one Esc drops you straight into picking
+        // another file; a second Esc quits, any tree key cancels the arming.
+        self.esc_confirm = true;
 
-            let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
+        let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
 
-            if dirty {
-                self.set_error("Unsaved changes — Esc again to discard and quit".to_string());
-            } else {
-                // Nothing to lose: pop the file browser open right away (keeping
-                // focus on the editor so a second Esc still quits) — one key for
-                // "let me pick another file, or bail out".
-                self.tree_visible = true;
+        if dirty {
+            self.set_error("Unsaved changes — Esc again to discard and quit".to_string());
+        } else {
+            self.tree_visible = true;
 
-                self.set_error("Esc again to quit · Tab to pick a file".to_string());
-            }
+            self.focus = Focus::Tree;
 
-            return;
+            self.set_error("Esc again to quit · or pick a file".to_string());
         }
-
-        self.should_quit = true;
     }
 
     fn on_picker_key(&mut self, key: KeyEvent, ctrl: bool) {
@@ -1003,22 +1007,22 @@ mod tests {
     }
 
     #[test]
-    fn esc_when_clean_arms_and_opens_file_browser() {
+    fn esc_when_clean_arms_opens_and_focuses_file_browser() {
         let mut app = app_with("escclean", "hello");
 
         assert!(!app.tree_visible);
 
-        app.on_key(plain(KeyCode::Esc)); // clean → arm quit AND reveal the tree
+        app.on_key(plain(KeyCode::Esc)); // clean → arm quit, open AND focus the tree
 
         assert!(app.esc_confirm);
 
         assert!(app.tree_visible, "first Esc should open the file browser");
 
-        assert_eq!(app.focus, Focus::Editor, "focus stays so a second Esc quits");
+        assert_eq!(app.focus, Focus::Tree, "and focus it, ready to pick a file");
 
         assert!(!app.should_quit);
 
-        app.on_key(plain(KeyCode::Esc)); // second Esc quits
+        app.on_key(plain(KeyCode::Esc)); // second Esc quits even from the tree
 
         assert!(app.should_quit);
     }

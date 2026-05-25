@@ -13,6 +13,7 @@ opencode ships syntect's 75 default grammars plus these extras:
   Solidity    — authored for opencode (MIT). .sol.
   Move        — authored for opencode (MIT). .move (Aptos/Sui).
   Noir        — authored for opencode (MIT). .nr (Aztec).
+  Circom      — authored for opencode (MIT). .circom (zkSNARK circuits).
 
 `.mjs`, `.cjs` and `.jsx` are aliased to the built-in JavaScript grammar.
 

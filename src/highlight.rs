@@ -37,6 +37,7 @@ const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/Solidity.sublime-syntax"),
     include_str!("../assets/syntaxes/Move.sublime-syntax"),
     include_str!("../assets/syntaxes/Noir.sublime-syntax"),
+    include_str!("../assets/syntaxes/Circom.sublime-syntax"),
 ];
 
 /// Variant extensions of a language syntect knows under a different one — mapped
@@ -351,6 +352,7 @@ mod tests {
             ("Token.sol", "Solidity"),
             ("coin.move", "Move"),
             ("main.nr", "Noir"),
+            ("circuit.circom", "Circom"),
             // JS variants alias onto the built-in JavaScript grammar.
             ("server.mjs", "JavaScript"),
             ("config.cjs", "JavaScript"),
@@ -371,6 +373,7 @@ mod tests {
             ("contract C { uint256 public x; }\n", "sol"),
             ("module m::a { fun f() { let x = 1; } }\n", "move"),
             ("fn main() { let x: Field = 1; }\n", "nr"),
+            ("template T() { signal input a; a <== 1; }\n", "circom"),
         ] {
             let spans = h.highlight_block(code, ext, h.current);
 

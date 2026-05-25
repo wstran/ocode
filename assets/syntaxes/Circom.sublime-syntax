@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Circom (zkSNARK circuits) highlighting.
+name: Circom
+file_extensions:
+  - circom
+scope: source.circom
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.circom
+    - match: '/\*'
+      scope: punctuation.definition.comment.circom
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.circom
+      push: double_string
+    - match: '\b(pragma|include)\b'
+      scope: keyword.control.directive.circom
+    - match: '(<==|==>|<--|-->|===)'
+      scope: keyword.operator.constraint.circom
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.circom
+    - match: '\b(template|component|function|return|if|else|for|while|do|assert|log|parallel|custom|bus|main|public)\b'
+      scope: keyword.control.circom
+    - match: '\b(signal|input|output|var)\b'
+      scope: storage.type.circom
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.circom
+      pop: true
+    - match: '.'
+      scope: comment.block.circom
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.circom
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.circom
+    - match: '.'
+      scope: string.quoted.double.circom

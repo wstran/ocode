@@ -14,6 +14,11 @@ opencode ships syntect's 75 default grammars plus these extras:
   Move        — authored for opencode (MIT). .move (Aptos/Sui).
   Noir        — authored for opencode (MIT). .nr (Aztec).
   Circom      — authored for opencode (MIT). .circom (zkSNARK circuits).
+  Cairo       — authored for opencode (MIT). .cairo (StarkNet).
+  Vyper       — authored for opencode (MIT). .vy (EVM).
+  Sway        — authored for opencode (MIT). .sw (Fuel).
+  Cadence     — authored for opencode (MIT). .cdc (Flow).
+  Leo         — authored for opencode (MIT). .leo (Aleo ZK).
 
 `.mjs`, `.cjs` and `.jsx` are aliased to the built-in JavaScript grammar.
 

@@ -1,0 +1,53 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Vyper (EVM) highlighting — Pythonic, so
+# comments use '#' and decorators use '@'.
+name: Vyper
+file_extensions:
+  - vy
+scope: source.vyper
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.vyper
+    - match: '"""'
+      scope: punctuation.definition.string.begin.vyper
+      push: docstring
+    - match: '"'
+      scope: punctuation.definition.string.begin.vyper
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.vyper
+      push: single_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.vyper
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
+      scope: constant.numeric.vyper
+    - match: '\b(True|False|None|self|msg|block|tx|chain|ZERO_ADDRESS|empty)\b'
+      scope: constant.language.vyper
+    - match: '\b(def|return|if|elif|else|for|in|while|pass|break|continue|import|from|as|struct|event|interface|enum|implements|assert|raise|log|and|or|not|public|external|internal|view|pure|payable|nonpayable|constant|immutable|indexed)\b'
+      scope: keyword.control.vyper
+    - match: '\b(address|bool|string|decimal|bytes\d*|String|Bytes|DynArray|HashMap|u?int\d*)\b'
+      scope: storage.type.vyper
+  docstring:
+    - match: '"""'
+      scope: punctuation.definition.string.end.vyper
+      pop: true
+    - match: '.'
+      scope: string.quoted.docstring.vyper
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.vyper
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.vyper
+    - match: '.'
+      scope: string.quoted.double.vyper
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.vyper
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.vyper
+    - match: '.'
+      scope: string.quoted.single.vyper

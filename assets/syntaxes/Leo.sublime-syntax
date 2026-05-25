@@ -1,0 +1,39 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Leo (Aleo ZK) highlighting — Rust-like.
+name: Leo
+file_extensions:
+  - leo
+scope: source.leo
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.leo
+    - match: '/\*'
+      scope: punctuation.definition.comment.leo
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.leo
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128|field|group|scalar)?\b'
+      scope: constant.numeric.leo
+    - match: '\b(true|false|self)\b'
+      scope: constant.language.leo
+    - match: '\b(program|function|transition|finalize|inline|struct|record|mapping|let|const|return|if|else|for|in|assert|assert_eq|assert_neq|import|as|public|private|constant|mut)\b'
+      scope: keyword.control.leo
+    - match: '\b(u8|u16|u32|u64|u128|i8|i16|i32|i64|i128|field|group|scalar|address|bool|signature|Future)\b'
+      scope: storage.type.leo
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.leo
+      pop: true
+    - match: '.'
+      scope: comment.block.leo
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.leo
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.leo
+    - match: '.'
+      scope: string.quoted.double.leo

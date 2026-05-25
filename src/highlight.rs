@@ -38,6 +38,11 @@ const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/Move.sublime-syntax"),
     include_str!("../assets/syntaxes/Noir.sublime-syntax"),
     include_str!("../assets/syntaxes/Circom.sublime-syntax"),
+    include_str!("../assets/syntaxes/Cairo.sublime-syntax"),
+    include_str!("../assets/syntaxes/Vyper.sublime-syntax"),
+    include_str!("../assets/syntaxes/Sway.sublime-syntax"),
+    include_str!("../assets/syntaxes/Cadence.sublime-syntax"),
+    include_str!("../assets/syntaxes/Leo.sublime-syntax"),
 ];
 
 /// Variant extensions of a language syntect knows under a different one — mapped
@@ -353,6 +358,11 @@ mod tests {
             ("coin.move", "Move"),
             ("main.nr", "Noir"),
             ("circuit.circom", "Circom"),
+            ("lib.cairo", "Cairo"),
+            ("token.vy", "Vyper"),
+            ("main.sw", "Sway"),
+            ("nft.cdc", "Cadence"),
+            ("main.leo", "Leo"),
             // JS variants alias onto the built-in JavaScript grammar.
             ("server.mjs", "JavaScript"),
             ("config.cjs", "JavaScript"),
@@ -374,6 +384,11 @@ mod tests {
             ("module m::a { fun f() { let x = 1; } }\n", "move"),
             ("fn main() { let x: Field = 1; }\n", "nr"),
             ("template T() { signal input a; a <== 1; }\n", "circom"),
+            ("fn main() -> felt252 { let x = 1; return x; }\n", "cairo"),
+            ("@external\ndef foo() -> uint256: return 1\n", "vy"),
+            ("contract C { fn main() -> u64 { return 1; } }\n", "sw"),
+            ("pub contract C { pub fun main(): Int { return 1 } }\n", "cdc"),
+            ("program p.aleo { transition main() -> u32 { return 1u32; } }\n", "leo"),
         ] {
             let spans = h.highlight_block(code, ext, h.current);
 

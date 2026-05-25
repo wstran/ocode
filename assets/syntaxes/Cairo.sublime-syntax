@@ -1,0 +1,53 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Cairo (StarkNet) highlighting — Rust-like.
+# Note: Cairo comments are // only; '#' starts an attribute, not a comment.
+name: Cairo
+file_extensions:
+  - cairo
+scope: source.cairo
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.cairo
+    - match: '/\*'
+      scope: punctuation.definition.comment.cairo
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.cairo
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.cairo
+      push: single_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.cairo
+    - match: '\b(true|false)\b'
+      scope: constant.language.cairo
+    - match: '\b(Self|self)\b'
+      scope: variable.language.cairo
+    - match: '\b(fn|let|mut|const|use|mod|struct|enum|trait|impl|if|else|match|loop|while|for|in|return|break|continue|ref|pub|extern|type|as|where|dyn|nopanic|implicits|of)\b'
+      scope: keyword.control.cairo
+    - match: '\b(felt252|bool|usize|u8|u16|u32|u64|u128|u256|i8|i16|i32|i64|i128|ByteArray|Array|Span|ContractAddress|ClassHash|Option|Result)\b'
+      scope: storage.type.cairo
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.cairo
+      pop: true
+    - match: '.'
+      scope: comment.block.cairo
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.cairo
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.cairo
+    - match: '.'
+      scope: string.quoted.double.cairo
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.cairo
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.cairo
+    - match: '.'
+      scope: string.quoted.single.cairo

@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Cadence (Flow) highlighting.
+name: Cadence
+file_extensions:
+  - cdc
+scope: source.cadence
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.cadence
+    - match: '/\*'
+      scope: punctuation.definition.comment.cadence
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.cadence
+      push: double_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: storage.modifier.resource.cadence
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
+      scope: constant.numeric.cadence
+    - match: '\b(true|false|nil|self)\b'
+      scope: constant.language.cadence
+    - match: '\b(let|var|fun|if|else|switch|case|default|for|in|while|return|break|continue|import|from|contract|resource|struct|interface|event|enum|transaction|prepare|execute|pre|post|init|destroy|create|emit|access|pub|priv|all|account|view|as)\b'
+      scope: keyword.control.cadence
+    - match: '\b(Int|UInt|Int8|Int16|Int32|Int64|Int128|Int256|UInt8|UInt16|UInt32|UInt64|UInt128|UInt256|Fix64|UFix64|Bool|String|Address|Void|AnyStruct|AnyResource|Type|Capability)\b'
+      scope: storage.type.cadence
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.cadence
+      pop: true
+    - match: '.'
+      scope: comment.block.cadence
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.cadence
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.cadence
+    - match: '.'
+      scope: string.quoted.double.cadence

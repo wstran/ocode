@@ -19,7 +19,7 @@ code — the only chrome is one status line at the bottom.
 - **Real undo/redo** — word-granular; "unsaved" means the text actually differs from disk.
 - **Watches the file** — auto-reloads external changes when clean, warns when not.
 - **Images & binaries** — views PNG/JPEG/… inline in Ghostty; other binaries show a hex preview, never an error.
-- **15 themes, 84 languages** — incl. TypeScript, Solidity, Move, Noir, Circom; add your own `.tmTheme` or `.sublime-syntax`.
+- **15 themes, 89 languages** — incl. TypeScript + the web3 stack (Solidity, Vyper, Move, Cairo, Noir, Circom, Sway, Cadence, Leo); add your own `.tmTheme` or `.sublime-syntax`.
 
 ## Install
 
@@ -109,10 +109,11 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 
 ## Languages
 
-**84 languages** out of the box — including **TypeScript** (`.ts` `.tsx` `.mts`
-`.cts`), **Solidity**, **Move**, **Noir** and **Circom**, plus TOML, `.env`, INI
-and Dockerfile. `.mjs`, `.cjs` and `.jsx` highlight as JavaScript. Add any
-`.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
+**89 languages** out of the box — including **TypeScript** (`.ts` `.tsx` `.mts`
+`.cts`) and the **web3 stack**: Solidity, Vyper, Move, Cairo, Noir, Circom,
+Sway, Cadence, Leo. Plus TOML, `.env`, INI and Dockerfile. `.mjs`, `.cjs` and
+`.jsx` highlight as JavaScript. Add any `.sublime-syntax` grammar in
+`~/.config/opencode/syntaxes/`.
 
 ## Images & other files
 

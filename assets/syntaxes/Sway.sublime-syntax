@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Sway (Fuel) highlighting — Rust-like.
+name: Sway
+file_extensions:
+  - sw
+scope: source.sway
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.sway
+    - match: '/\*'
+      scope: punctuation.definition.comment.sway
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.sway
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.sway
+    - match: '\b(true|false)\b'
+      scope: constant.language.sway
+    - match: '\b(Self|self)\b'
+      scope: variable.language.sway
+    - match: '\b(script|contract|predicate|library|abi|storage|configurable|fn|let|mut|pub|struct|enum|trait|impl|use|mod|dep|if|else|match|while|for|in|return|break|continue|ref|const|as|where|asm)\b'
+      scope: keyword.control.sway
+    - match: '\b(u8|u16|u32|u64|u256|bool|b256|str|Address|ContractId|Identity|Vec|Option|Result|StorageMap)\b'
+      scope: storage.type.sway
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.sway
+      pop: true
+    - match: '.'
+      scope: comment.block.sway
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.sway
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.sway
+    - match: '.'
+      scope: string.quoted.double.sway

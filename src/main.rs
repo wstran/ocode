@@ -31,8 +31,9 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 // NB: Ghostty has no same-line comments (issue #3350) — every `#` must be on
 // its own line, or the rest of the line becomes part of the keybind value.
 const GHOSTTY_CONFIG: &str = "\
-# opencode — recommended Ghostty config. Append to ~/.config/ghostty/config
-# and reload with Cmd+Shift+, (these keys can't be handled inside the app).
+# opencode — recommended Ghostty config. Open Ghostty's config with Cmd+,
+# (its real path differs per OS; on macOS it's under Application Support, not
+# ~/.config), paste these in, then reload with Cmd+Shift+,.
 
 # Cmd+Left / Cmd+Right -> line start / end (same as Fn+Left/Right = Home/End).
 # Ghostty sends Ctrl+A / Ctrl+E here by default, which collides with Select-all.

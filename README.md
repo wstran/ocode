@@ -100,10 +100,11 @@ open · `Tab` to editor. Opening a file gives the editor the full screen.
 
 opencode is built for **[Ghostty](https://ghostty.org) — the recommended
 terminal.** It speaks the kitty graphics protocol (inline images, no setup) and
-lets you fix the two macOS keys that no terminal can send cleanly. Add the block
-below to `~/.config/ghostty/config` and reload with `⌘⇧,` — or run **`ocode
---ghostty-config`** to print it (it ships in the binary, so it's there again
-after any reinstall, no need to remember it):
+lets you fix the two macOS keys that no terminal can send cleanly. Open your
+Ghostty config with **`⌘,`** (its real path differs per OS — on macOS it lives
+under *Application Support*, not `~/.config`), paste in the block below, and
+reload with `⌘⇧,`. Run **`ocode --ghostty-config`** to print it — it ships in
+the binary, so it's there again after any reinstall, no need to remember it:
 
 ```ini
 # ⌘←/→ → line start / end — i.e. exactly like Fn ←/→ (Home / End).

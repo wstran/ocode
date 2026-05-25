@@ -1,6 +1,6 @@
 [package]
 name = "opencode"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 rust-version = "1.85"
 description = "A fast, no-frills terminal code reader and editor — open a file or folder and read syntax-highlighted code, then edit, all in your terminal."

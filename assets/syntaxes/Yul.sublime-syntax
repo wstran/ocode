@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Yul (EVM IR) highlighting.
+name: Yul
+file_extensions:
+  - yul
+scope: source.yul
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.yul
+    - match: '/\*'
+      scope: punctuation.definition.comment.yul
+      push: block_comment
+    - match: '(hex|)"'
+      scope: punctuation.definition.string.begin.yul
+      push: double_string
+    - match: ':='
+      scope: keyword.operator.assignment.yul
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.yul
+    - match: '\b(true|false)\b'
+      scope: constant.language.yul
+    - match: '\b(object|code|data|let|function|if|switch|case|default|for|leave|break|continue)\b'
+      scope: keyword.control.yul
+    - match: '\b(stop|add|mul|sub|div|sdiv|mod|smod|exp|not|lt|gt|slt|sgt|eq|iszero|and|or|xor|byte|shl|shr|sar|addmod|mulmod|keccak256|sha3|address|balance|origin|caller|callvalue|calldataload|calldatasize|calldatacopy|codesize|codecopy|gasprice|extcodesize|extcodecopy|returndatasize|returndatacopy|blockhash|coinbase|timestamp|number|difficulty|prevrandao|gaslimit|chainid|selfbalance|basefee|pop|mload|mstore|mstore8|sload|sstore|tload|tstore|mcopy|jump|jumpi|pc|msize|gas|create|create2|call|callcode|delegatecall|staticcall|return|revert|invalid|selfdestruct|log0|log1|log2|log3|log4|datasize|dataoffset|datacopy|setimmutable|loadimmutable|linkersymbol|memoryguard|verbatim)\b'
+      scope: support.function.builtin.yul
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.yul
+      pop: true
+    - match: '.'
+      scope: comment.block.yul
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.yul
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.yul
+    - match: '.'
+      scope: string.quoted.double.yul

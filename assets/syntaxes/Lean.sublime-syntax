@@ -1,0 +1,40 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Lean 4 (theorem prover) highlighting.
+# Note: comments are `--` (line) and `/- -/` (block) — not the C style.
+name: Lean
+file_extensions:
+  - lean
+scope: source.lean
+contexts:
+  main:
+    - match: '--.*$'
+      scope: comment.line.double-dash.lean
+    - match: '/-'
+      scope: punctuation.definition.comment.lean
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.lean
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
+      scope: constant.numeric.lean
+    - match: '\b(true|false|sorry)\b'
+      scope: constant.language.lean
+    - match: '\b(theorem|lemma|def|example|instance|class|structure|inductive|where|with|match|fun|do|let|mut|if|then|else|by|have|show|from|calc|namespace|open|import|variable|universe|section|end|deriving|abbrev|partial|mutual|macro|notation|attribute|set_option|return|try|catch|for|in|while|unless)\b'
+      scope: keyword.control.lean
+    - match: '\b(Nat|Int|Bool|String|Char|Float|Prop|Type|Sort|List|Array|Option|Unit|Fin)\b'
+      scope: storage.type.lean
+  block_comment:
+    - match: '-/'
+      scope: punctuation.definition.comment.lean
+      pop: true
+    - match: '.'
+      scope: comment.block.lean
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.lean
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.lean
+    - match: '.'
+      scope: string.quoted.double.lean

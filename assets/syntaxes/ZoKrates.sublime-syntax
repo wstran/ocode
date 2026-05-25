@@ -1,0 +1,39 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal ZoKrates (ZK DSL) highlighting.
+name: ZoKrates
+file_extensions:
+  - zok
+scope: source.zokrates
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.zokrates
+    - match: '/\*'
+      scope: punctuation.definition.comment.zokrates
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.zokrates
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.zokrates
+    - match: '\b(true|false)\b'
+      scope: constant.language.zokrates
+    - match: '\b(def|return|import|from|as|if|else|for|in|do|endfor|struct|const|private|public|assert|mut|type)\b'
+      scope: keyword.control.zokrates
+    - match: '\b(field|bool|u8|u16|u32|u64)\b'
+      scope: storage.type.zokrates
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.zokrates
+      pop: true
+    - match: '.'
+      scope: comment.block.zokrates
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.zokrates
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.zokrates
+    - match: '.'
+      scope: string.quoted.double.zokrates

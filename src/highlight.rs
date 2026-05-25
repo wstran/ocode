@@ -43,6 +43,10 @@ const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/Sway.sublime-syntax"),
     include_str!("../assets/syntaxes/Cadence.sublime-syntax"),
     include_str!("../assets/syntaxes/Leo.sublime-syntax"),
+    include_str!("../assets/syntaxes/Yul.sublime-syntax"),
+    include_str!("../assets/syntaxes/Huff.sublime-syntax"),
+    include_str!("../assets/syntaxes/ZoKrates.sublime-syntax"),
+    include_str!("../assets/syntaxes/Lean.sublime-syntax"),
 ];
 
 /// Variant extensions of a language syntect knows under a different one — mapped
@@ -363,6 +367,10 @@ mod tests {
             ("main.sw", "Sway"),
             ("nft.cdc", "Cadence"),
             ("main.leo", "Leo"),
+            ("opt.yul", "Yul"),
+            ("Main.huff", "Huff"),
+            ("circuit.zok", "ZoKrates"),
+            ("Proof.lean", "Lean"),
             // JS variants alias onto the built-in JavaScript grammar.
             ("server.mjs", "JavaScript"),
             ("config.cjs", "JavaScript"),
@@ -389,6 +397,10 @@ mod tests {
             ("contract C { fn main() -> u64 { return 1; } }\n", "sw"),
             ("pub contract C { pub fun main(): Int { return 1 } }\n", "cdc"),
             ("program p.aleo { transition main() -> u32 { return 1u32; } }\n", "leo"),
+            ("object \"C\" { code { let x := mload(0x40) } }\n", "yul"),
+            ("#define macro MAIN() = takes(0) returns(0) { 0x00 mload }\n", "huff"),
+            ("def main(field a) -> field { return a; }\n", "zok"),
+            ("theorem t : 1 = 1 := by rfl -- proof\n", "lean"),
         ] {
             let spans = h.highlight_block(code, ext, h.current);
 

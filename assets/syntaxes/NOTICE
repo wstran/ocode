@@ -19,6 +19,10 @@ opencode ships syntect's 75 default grammars plus these extras:
   Sway        — authored for opencode (MIT). .sw (Fuel).
   Cadence     — authored for opencode (MIT). .cdc (Flow).
   Leo         — authored for opencode (MIT). .leo (Aleo ZK).
+  Yul         — authored for opencode (MIT). .yul (EVM IR).
+  Huff        — authored for opencode (MIT). .huff (EVM assembly).
+  ZoKrates    — authored for opencode (MIT). .zok (ZK DSL).
+  Lean        — authored for opencode (MIT). .lean (theorem prover).
 
 `.mjs`, `.cjs` and `.jsx` are aliased to the built-in JavaScript grammar.
 

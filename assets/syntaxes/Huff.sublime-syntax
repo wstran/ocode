@@ -1,0 +1,39 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Huff (EVM assembly) highlighting.
+name: Huff
+file_extensions:
+  - huff
+scope: source.huff
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.huff
+    - match: '/\*'
+      scope: punctuation.definition.comment.huff
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.huff
+      push: double_string
+    - match: '#\s*(define|include)\b'
+      scope: keyword.control.directive.huff
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.huff
+    - match: '\b(macro|fn|function|event|error|constant|takes|returns|table|jumptable|jumptable__packed|codetable|FREE_STORAGE_POINTER)\b'
+      scope: keyword.control.huff
+    - match: '\b(push\d*|dup\d+|swap\d+|add|mul|sub|div|sdiv|mod|exp|lt|gt|eq|iszero|and|or|xor|not|shl|shr|sar|byte|keccak256|sha3|mload|mstore|mstore8|sload|sstore|calldataload|calldatasize|calldatacopy|codecopy|returndatasize|returndatacopy|pop|jump|jumpi|jumpdest|pc|msize|gas|caller|callvalue|address|balance|origin|timestamp|number|chainid|call|staticcall|delegatecall|create|create2|return|revert|stop|selfdestruct|log0|log1|log2|log3|log4)\b'
+      scope: support.function.builtin.huff
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.huff
+      pop: true
+    - match: '.'
+      scope: comment.block.huff
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.huff
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.huff
+    - match: '.'
+      scope: string.quoted.double.huff

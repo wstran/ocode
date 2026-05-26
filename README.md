@@ -60,7 +60,7 @@ ocode --style       # change the color scheme
 | `Ctrl+F` | Find |
 | `Ctrl+B` | File browser |
 | `Ctrl+R` | Reload from disk |
-| `Esc` | Step back: clear selection → leave tree → open file list & arm quit → quit |
+| `Esc` | Clear selection; else arm quit (when editing a file it also opens the browser); again to quit |
 | `Ctrl+Q` | Quit |
 
 **Move** (add `Shift` to select)
@@ -86,8 +86,10 @@ ocode --style       # change the color scheme
 | `⌥ Fn Delete` · `Ctrl Delete` | Delete the word ahead |
 | `Tab` / `Shift+Tab` | Indent / outdent the line |
 
-**File tree** (`Ctrl+B`): `↑/↓` move · `→/←` expand/collapse · `Enter`/`Space`
-open · `Tab` to editor. Opening a file gives the editor the full screen.
+**File tree** — open it with `Enter` (from the welcome screen) or `Ctrl+B`:
+`↑/↓` move · `→/←` expand/collapse · `Enter`/`Space` open · `Tab` to editor. It
+re-reads the folder as files appear or disappear. opencode starts on the
+welcome screen; opening a file gives the editor the full screen.
 
 ## Terminal setup (macOS)
 

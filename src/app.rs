@@ -85,7 +85,9 @@ impl App {
         let is_dir = path.is_dir();
 
         let (buffer, media, tree_root, focus, tree_visible) = if is_dir {
-            (None, None, path.clone(), Focus::Tree, true)
+            // Open on the welcome screen alone; the file browser is one Enter (or
+            // Ctrl+B) away rather than taking half the screen unprompted.
+            (None, None, path.clone(), Focus::Editor, false)
         } else {
             let root = buffer::parent_dir(&path);
 
@@ -225,27 +227,22 @@ impl App {
             return;
         }
 
-        if self.focus == Focus::Tree {
-            self.focus = Focus::Editor;
-
-            return;
-        }
-
-        // Editor, nothing to cancel: arm the quit. When clean, also pop the file
-        // browser open AND focus it, so one Esc drops you straight into picking
-        // another file; a second Esc quits, any tree key cancels the arming.
         self.esc_confirm = true;
 
         let dirty = self.buffer.as_ref().map(|b| b.modified).unwrap_or(false);
 
         if dirty {
             self.set_error("Unsaved changes — Esc again to discard and quit".to_string());
-        } else {
-            self.tree_visible = true;
-
-            self.focus = Focus::Tree;
+        } else if self.buffer.is_some() && !self.tree_visible {
+            // Editing a file with nothing to cancel: pop the file browser open
+            // AND focus it, so one Esc drops you straight into picking another
+            // file. If it's already open (or we're on the welcome screen) leave
+            // it untouched — just arm the quit.
+            self.show_tree();
 
             self.set_error("Esc again to quit · or pick a file".to_string());
+        } else {
+            self.set_error("Esc again to quit".to_string());
         }
     }
 
@@ -320,8 +317,15 @@ impl App {
         let nav = if cfg!(target_os = "macos") { alt } else { ctrl };
 
         let Some(buf) = self.buffer.as_mut() else {
-            if key.code == KeyCode::Tab && self.tree_visible {
-                self.focus = Focus::Tree;
+            match key.code {
+                KeyCode::Tab if self.tree_visible => self.focus = Focus::Tree,
+
+                // On the welcome screen, Enter opens the file browser (so does
+                // Ctrl+B). Once it's open Enter does nothing here — it only acts
+                // again after Ctrl+B closes it back to the welcome screen.
+                KeyCode::Enter if !self.tree_visible => self.show_tree(),
+
+                _ => {}
             }
 
             return;
@@ -626,7 +630,9 @@ impl App {
             wake = Some(until.saturating_duration_since(Instant::now()));
         }
 
-        if self.buffer.is_some() {
+        // Poll once a second while a file is open (watch it on disk) or while the
+        // tree is up (watch the folder for new / removed files).
+        if self.buffer.is_some() || self.tree_visible {
             let poll = Duration::from_millis(1000);
 
             wake = Some(wake.map_or(poll, |w| w.min(poll)));
@@ -644,6 +650,10 @@ impl App {
         }
 
         self.poll_disk();
+
+        if self.tree_visible {
+            self.tree.poll();
+        }
     }
 
     fn copy(&mut self) {
@@ -734,13 +744,21 @@ impl App {
         self.status_until = None;
     }
 
+    /// Open the file browser and focus it, re-reading the folder so newly
+    /// created / deleted files show up.
+    fn show_tree(&mut self) {
+        self.tree.refresh();
+
+        self.tree_visible = true;
+
+        self.focus = Focus::Tree;
+    }
+
     /// Ctrl+B as a three-step cycle so one key both opens the file list and
     /// returns to it: hidden → show & focus → (from editor) focus it → hide.
     fn toggle_tree(&mut self) {
         if !self.tree_visible {
-            self.tree_visible = true;
-
-            self.focus = Focus::Tree;
+            self.show_tree();
         } else if self.focus != Focus::Tree {
             self.focus = Focus::Tree;
         } else {
@@ -1061,9 +1079,8 @@ mod tests {
         assert!(!app.should_quit);
     }
 
-    #[test]
-    fn esc_in_tree_returns_to_editor() {
-        let dir = std::env::temp_dir().join("opencode_esc_tree");
+    fn app_in_dir(name: &str) -> (App, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("opencode_dir_{name}"));
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1075,13 +1092,60 @@ mod tests {
 
         app.picker = None;
 
-        assert_eq!(app.focus, Focus::Tree);
+        (app, dir)
+    }
 
-        app.on_key(plain(KeyCode::Esc)); // leaves the tree, no quit
+    #[test]
+    fn welcome_starts_without_sidebar_and_enter_opens_it() {
+        let (mut app, dir) = app_in_dir("welcome");
+
+        assert!(app.buffer.is_none() && !app.tree_visible, "starts on the welcome screen alone");
 
         assert_eq!(app.focus, Focus::Editor);
 
-        assert!(!app.should_quit);
+        app.on_key(plain(KeyCode::Enter)); // Enter from welcome opens + focuses the browser
+
+        assert!(app.tree_visible);
+
+        assert_eq!(app.focus, Focus::Tree);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn esc_on_welcome_quits_without_opening_sidebar() {
+        let (mut app, dir) = app_in_dir("escwelcome");
+
+        app.on_key(plain(KeyCode::Esc)); // arm, but no file open → don't pop the sidebar
+
+        assert!(app.esc_confirm);
+
+        assert!(!app.tree_visible, "Esc on the welcome screen must not open the sidebar");
+
+        app.on_key(plain(KeyCode::Esc));
+
+        assert!(app.should_quit);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn esc_with_sidebar_open_arms_then_quits_without_focus_bounce() {
+        let (mut app, dir) = app_in_dir("escsidebar");
+
+        app.on_key(plain(KeyCode::Enter)); // open + focus the sidebar
+
+        assert!(app.tree_visible && app.focus == Focus::Tree);
+
+        app.on_key(plain(KeyCode::Esc)); // already open → just arm, no re-show / no bounce
+
+        assert!(app.esc_confirm);
+
+        assert_eq!(app.focus, Focus::Tree, "focus stays on the sidebar");
+
+        app.on_key(plain(KeyCode::Esc));
+
+        assert!(app.should_quit);
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -1215,6 +1279,8 @@ mod tests {
 
         app.picker = None;
 
+        app.on_key(plain(KeyCode::Enter)); // welcome → open the file browser
+
         app.on_key(plain(KeyCode::Enter)); // open a.txt (selected first)
 
         app.on_key(plain(KeyCode::Char('X'))); // make it dirty
@@ -1254,6 +1320,8 @@ mod tests {
 
         assert!(app.buffer.is_none());
 
+        app.on_key(plain(KeyCode::Enter)); // welcome → open the file browser
+
         app.on_key(plain(KeyCode::Char(' '))); // Space opens the selected file
 
         assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hello");
@@ -1275,9 +1343,11 @@ mod tests {
 
         app.picker = None;
 
-        assert!(app.tree_visible, "a directory launch shows the tree");
+        app.on_key(plain(KeyCode::Enter)); // welcome → open the file browser
 
-        app.on_key(plain(KeyCode::Enter)); // open a.txt
+        assert!(app.tree_visible, "Enter opens the tree from the welcome screen");
+
+        app.on_key(plain(KeyCode::Enter)); // open a.txt from the tree
 
         assert!(!app.tree_visible, "tree closes after opening a file");
 

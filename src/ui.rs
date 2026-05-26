@@ -308,7 +308,7 @@ fn render_welcome(frame: &mut Frame, area: Rect) {
 
     content.push(Line::from(""));
 
-    content.push(centered(width, "Ctrl+B  open a file        Ctrl+Q  quit", Style::default().fg(GUTTER_FG)));
+    content.push(centered(width, "Enter or Ctrl+B  browse files        Ctrl+Q  quit", Style::default().fg(GUTTER_FG)));
 
     content.push(centered(width, &format!("move with {nav}  ·  Ctrl+S save  ·  Ctrl+Z undo"), Style::default().fg(GUTTER_FG)));
 
@@ -715,6 +715,8 @@ mod tests {
         let mut app = App::new(PathBuf::from(&dir), false).unwrap();
 
         app.picker = None;
+
+        app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter)); // open the browser
 
         let screen = render_to_string(&mut app, 80, 24);
 

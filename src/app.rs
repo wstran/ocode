@@ -210,6 +210,11 @@ impl App {
         }
     }
 
+    /// True only on the empty welcome screen — no file is open, text or media.
+    fn on_welcome(&self) -> bool {
+        self.buffer.is_none() && self.media.is_none()
+    }
+
     fn handle_escape(&mut self) {
         if let Some(buf) = self.buffer.as_mut() {
             if buf.selection().is_some() {
@@ -233,9 +238,9 @@ impl App {
 
         if dirty {
             self.set_error("Unsaved changes — Esc again to discard and quit".to_string());
-        } else if self.buffer.is_some() && !self.tree_visible {
-            // Editing a file with nothing to cancel: pop the file browser open
-            // AND focus it, so one Esc drops you straight into picking another
+        } else if !self.on_welcome() && !self.tree_visible {
+            // A file is open (text or image/binary) with nothing to cancel: pop
+            // the browser open AND focus it, so one Esc jumps to picking another
             // file. If it's already open (or we're on the welcome screen) leave
             // it untouched — just arm the quit.
             self.show_tree();
@@ -323,7 +328,9 @@ impl App {
                 // On the welcome screen, Enter opens the file browser (so does
                 // Ctrl+B). Once it's open Enter does nothing here — it only acts
                 // again after Ctrl+B closes it back to the welcome screen.
-                KeyCode::Enter if !self.tree_visible => self.show_tree(),
+                // Enter opens the browser only from the welcome screen — not
+                // while viewing an image / binary (also a no-buffer view).
+                KeyCode::Enter if self.on_welcome() && !self.tree_visible => self.show_tree(),
 
                 _ => {}
             }
@@ -1148,6 +1155,48 @@ mod tests {
         assert!(app.should_quit);
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn app_with_binary(name: &str) -> (App, PathBuf) {
+        let path = std::env::temp_dir().join(format!("opencode_bin_{name}.pdf"));
+
+        fs::write(&path, b"%PDF-1.4\n\x00\x01\x02binary").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        (app, path)
+    }
+
+    #[test]
+    fn esc_on_a_media_view_opens_and_focuses_the_sidebar() {
+        let (mut app, path) = app_with_binary("esc");
+
+        assert!(app.media.is_some() && app.buffer.is_none(), "binary opens as a media view");
+
+        app.on_key(plain(KeyCode::Esc)); // a file is open → pop + focus the browser
+
+        assert!(app.tree_visible, "Esc on a binary/image view must open the sidebar");
+
+        assert_eq!(app.focus, Focus::Tree);
+
+        app.on_key(plain(KeyCode::Esc));
+
+        assert!(app.should_quit);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enter_on_a_media_view_does_not_open_the_sidebar() {
+        let (mut app, path) = app_with_binary("enter");
+
+        app.on_key(plain(KeyCode::Enter)); // not the welcome screen → Enter is inert here
+
+        assert!(!app.tree_visible, "Enter must not open the sidebar from a media view");
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

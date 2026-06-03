@@ -1,0 +1,60 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Assembly (NASM / GAS / AT&T) highlighting.
+# Many dialects coexist: ';' (NASM) and '#' (AT&T) both start line comments.
+name: Assembly
+file_extensions:
+  - asm
+  - s
+  - S
+  - nasm
+scope: source.asm
+contexts:
+  main:
+    - match: ';.*$'
+      scope: comment.line.semicolon.asm
+    - match: '#.*$'
+      scope: comment.line.number-sign.asm
+    - match: '//.*$'
+      scope: comment.line.double-slash.asm
+    - match: '/\*'
+      scope: punctuation.definition.comment.asm
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.asm
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.asm
+      push: single_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*)[hHbBdDqQ]?\b'
+      scope: constant.numeric.asm
+    - match: '^\s*\.[A-Za-z_][A-Za-z0-9_]*'
+      scope: keyword.control.directive.asm
+    - match: '\b(section|segment|global|extern|org|bits|use16|use32|use64|db|dw|dd|dq|dt|equ|resb|resw|resd|resq|times|incbin|absolute|cpu|float|default|common|public|local|weak)\b'
+      scope: keyword.control.asm
+    - match: '\b(mov|movb|movw|movl|movq|movzx|movsx|push|pop|pushf|popf|call|ret|leave|enter|jmp|je|jne|jg|jl|jge|jle|jz|jnz|jc|jnc|jo|jno|js|jns|ja|jb|jae|jbe|loop|loopz|loopnz|add|adc|sub|sbb|mul|imul|div|idiv|inc|dec|neg|and|or|xor|not|shl|shr|sar|sal|rol|ror|rcl|rcr|cmp|test|lea|nop|int|syscall|sysenter|sysexit|hlt|in|out|rep|repe|repne|cld|std|cli|sti|clc|stc|cmc|fld|fst|fadd|fsub|fmul|fdiv|fsqrt|xchg|cmpxchg|lock|xadd|bswap|cpuid|rdtsc|sse|movss|movsd|addss|subss|mulss|divss|vmovss|vmovapd|vaddpd|vsubpd|vmulpd|vdivpd)\b'
+      scope: support.function.instruction.asm
+    - match: '\b(eax|ebx|ecx|edx|esi|edi|esp|ebp|eip|rax|rbx|rcx|rdx|rsi|rdi|rsp|rbp|rip|r8|r9|r10|r11|r12|r13|r14|r15|r8d|r9d|r10d|r11d|r12d|r13d|r14d|r15d|al|bl|cl|dl|sil|dil|spl|bpl|ah|bh|ch|dh|ax|bx|cx|dx|si|di|sp|bp|cs|ds|es|fs|gs|ss|cr0|cr2|cr3|cr4|xmm0|xmm1|xmm2|xmm3|xmm4|xmm5|xmm6|xmm7|xmm8|xmm9|xmm10|xmm11|xmm12|xmm13|xmm14|xmm15|ymm0|ymm1|zmm0|zmm1|st0|st1)\b'
+      scope: variable.language.register.asm
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.asm
+      pop: true
+    - match: '.'
+      scope: comment.block.asm
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.asm
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.asm
+    - match: '.'
+      scope: string.quoted.double.asm
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.asm
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.asm
+    - match: '.'
+      scope: string.quoted.single.asm

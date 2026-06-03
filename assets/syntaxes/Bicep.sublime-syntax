@@ -1,0 +1,50 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Bicep (Azure ARM) highlighting.
+name: Bicep
+file_extensions:
+  - bicep
+scope: source.bicep
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.bicep
+    - match: '/\*'
+      scope: punctuation.definition.comment.bicep
+      push: block_comment
+    - match: "'''"
+      scope: punctuation.definition.string.begin.bicep
+      push: block_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.bicep
+      push: single_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.bicep
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.bicep
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.bicep
+    - match: '\b(targetScope|resource|module|param|var|output|type|for|in|if|existing|union|using|extends|with|provider|func|loadTextContent|loadFileAsBase64|loadJsonContent|metadata|import|export|sys|az|kubernetes)\b'
+      scope: keyword.control.bicep
+    - match: '\b(string|int|bool|object|array|resource|any|secureString|secureObject)\b'
+      scope: storage.type.bicep
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.bicep
+      pop: true
+    - match: '.'
+      scope: comment.block.bicep
+  block_string:
+    - match: "'''"
+      scope: punctuation.definition.string.end.bicep
+      pop: true
+    - match: '.'
+      scope: string.quoted.block.bicep
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.bicep
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.bicep
+    - match: '.'
+      scope: string.quoted.single.bicep

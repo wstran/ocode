@@ -1,0 +1,46 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal GraphQL schema / query highlighting.
+name: GraphQL
+file_extensions:
+  - graphql
+  - gql
+scope: source.graphql
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.graphql
+    - match: '"""'
+      scope: punctuation.definition.string.begin.graphql
+      push: block_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.graphql
+      push: double_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.directive.graphql
+    - match: '\$[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.parameter.graphql
+    - match: '\b(0[xX][0-9a-fA-F_]+|-?\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.graphql
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.graphql
+    - match: '\b(query|mutation|subscription|fragment|type|interface|union|enum|input|scalar|schema|extend|directive|on|implements|repeatable)\b'
+      scope: keyword.control.graphql
+    - match: '\b(Int|Float|String|Boolean|ID)\b'
+      scope: storage.type.graphql
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.graphql
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.graphql
+    - match: '.'
+      scope: string.quoted.block.graphql
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.graphql
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.graphql
+    - match: '.'
+      scope: string.quoted.double.graphql

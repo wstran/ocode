@@ -1,0 +1,51 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal LIGO (Tezos) highlighting.
+# Covers .ligo (PascaLIGO), .mligo (CameLIGO), .jsligo (JsLIGO).
+name: LIGO
+file_extensions:
+  - ligo
+  - mligo
+  - jsligo
+scope: source.ligo
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.ligo
+    - match: '/\*'
+      scope: punctuation.definition.comment.ligo
+      push: block_comment
+    - match: '\(\*'
+      scope: punctuation.definition.comment.ligo
+      push: ml_block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.ligo
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?[a-zA-Z]*)\b'
+      scope: constant.numeric.ligo
+    - match: '\b(true|false|unit|None|Some)\b'
+      scope: constant.language.ligo
+    - match: '\b(function|let|const|var|if|then|else|match|with|case|type|record|contract|entrypoint|operation|do|begin|end|of|in|for|while|loop|block|procedure|module|namespace|export|import|return|fun|rec|mut|struct|interface)\b'
+      scope: keyword.control.ligo
+    - match: '\b(int|nat|tez|mutez|address|bytes|string|list|map|set|option|bool|unit|operation|chain_id|signature|key|key_hash|timestamp|big_map|sapling_state|sapling_transaction)\b'
+      scope: storage.type.ligo
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.ligo
+      pop: true
+    - match: '.'
+      scope: comment.block.ligo
+  ml_block_comment:
+    - match: '\*\)'
+      scope: punctuation.definition.comment.ligo
+      pop: true
+    - match: '.'
+      scope: comment.block.ligo
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.ligo
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.ligo
+    - match: '.'
+      scope: string.quoted.double.ligo

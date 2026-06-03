@@ -1,0 +1,73 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal PowerShell highlighting.
+# Block comments are <# ... #>.
+name: PowerShell
+file_extensions:
+  - ps1
+  - psm1
+  - psd1
+scope: source.powershell
+contexts:
+  main:
+    - match: '<#'
+      scope: punctuation.definition.comment.powershell
+      push: block_comment
+    - match: '#.*$'
+      scope: comment.line.number-sign.powershell
+    - match: '@"'
+      scope: punctuation.definition.string.begin.powershell
+      push: herestring_double
+    - match: "@'"
+      scope: punctuation.definition.string.begin.powershell
+      push: herestring_single
+    - match: '"'
+      scope: punctuation.definition.string.begin.powershell
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.powershell
+      push: single_string
+    - match: '\$[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.other.powershell
+    - match: '\$\{[^}]*\}'
+      scope: variable.other.powershell
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?[kKmMgGtTpPlLdD]?)\b'
+      scope: constant.numeric.powershell
+    - match: '\$(true|false|null)\b'
+      scope: constant.language.powershell
+    - match: '\b(function|param|if|elseif|else|switch|foreach|for|while|do|until|break|continue|return|try|catch|finally|throw|begin|process|end|filter|class|enum|hidden|static|public|private|internal|protected|new|using|namespace|trap|in)\b'
+      scope: keyword.control.powershell
+    - match: '\B-[A-Za-z][A-Za-z0-9]*'
+      scope: variable.parameter.flag.powershell
+  block_comment:
+    - match: '#>'
+      scope: punctuation.definition.comment.powershell
+      pop: true
+    - match: '.'
+      scope: comment.block.powershell
+  herestring_double:
+    - match: '^"@'
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - match: '.'
+      scope: string.quoted.herestring.powershell
+  herestring_single:
+    - match: "^'@"
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - match: '.'
+      scope: string.quoted.herestring.powershell
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - match: '`.'
+      scope: constant.character.escape.powershell
+    - match: '.'
+      scope: string.quoted.double.powershell
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - match: '.'
+      scope: string.quoted.single.powershell

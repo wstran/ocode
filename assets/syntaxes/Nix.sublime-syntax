@@ -1,0 +1,47 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Nix highlighting.
+# Strings come in two flavours: " ... " and '' ... '' (indented).
+name: Nix
+file_extensions:
+  - nix
+scope: source.nix
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.nix
+    - match: '/\*'
+      scope: punctuation.definition.comment.nix
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.nix
+      push: double_string
+    - match: "''"
+      scope: punctuation.definition.string.begin.nix
+      push: indented_string
+    - match: '\b\d+(\.\d+)?\b'
+      scope: constant.numeric.nix
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.nix
+    - match: '\b(let|in|with|rec|inherit|if|then|else|import|builtins|assert|or)\b'
+      scope: keyword.control.nix
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.nix
+      pop: true
+    - match: '.'
+      scope: comment.block.nix
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.nix
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.nix
+    - match: '.'
+      scope: string.quoted.double.nix
+  indented_string:
+    - match: "''"
+      scope: punctuation.definition.string.end.nix
+      pop: true
+    - match: '.'
+      scope: string.quoted.other.nix

@@ -1,0 +1,43 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Verilog / SystemVerilog highlighting.
+name: Verilog
+file_extensions:
+  - v
+  - sv
+  - svh
+scope: source.verilog
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.verilog
+    - match: '/\*'
+      scope: punctuation.definition.comment.verilog
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.verilog
+      push: double_string
+    - match: '`[A-Za-z_][A-Za-z0-9_]*'
+      scope: keyword.control.directive.verilog
+    - match: "\\b\\d*'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_?]+\\b"
+      scope: constant.numeric.sized.verilog
+    - match: '\b(\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.verilog
+    - match: '\b(module|endmodule|input|output|inout|reg|wire|logic|begin|end|always|always_ff|always_comb|always_latch|initial|if|else|case|casez|casex|endcase|for|while|repeat|forever|assign|function|endfunction|task|endtask|parameter|localparam|generate|endgenerate|genvar|integer|real|time|signed|unsigned|posedge|negedge|or|and|not|nand|nor|xor|xnor|primitive|endprimitive|specify|endspecify|return|break|continue|class|endclass|virtual|interface|endinterface|package|endpackage|import|export|extends|implements|new|this|super|null|typedef|enum|struct|union|packed|bit|byte|shortint|longint|chandle|string)\b'
+      scope: keyword.control.verilog
+    - match: '\b(reg|wire|logic|bit|byte|int|integer|real|shortint|longint|chandle|string|tri|wand|wor|tri0|tri1|triand|trior|trireg|supply0|supply1)\b'
+      scope: storage.type.verilog
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.verilog
+      pop: true
+    - match: '.'
+      scope: comment.block.verilog
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.verilog
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.verilog
+    - match: '.'
+      scope: string.quoted.double.verilog

@@ -1,0 +1,43 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal HCL / Terraform highlighting.
+name: HCL
+file_extensions:
+  - tf
+  - tfvars
+  - hcl
+scope: source.hcl
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.hcl
+    - match: '//.*$'
+      scope: comment.line.double-slash.hcl
+    - match: '/\*'
+      scope: punctuation.definition.comment.hcl
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.hcl
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.hcl
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.hcl
+    - match: '\b(terraform|resource|data|provider|variable|output|module|locals|backend|required_version|required_providers|dynamic|for_each|count|content|description|default|sensitive|nullable|validation|depends_on|lifecycle|providers|source|version|for|in|if|else|endfor|endif)\b'
+      scope: keyword.control.hcl
+    - match: '\b(string|number|bool|list|map|set|object|tuple|any)\b'
+      scope: storage.type.hcl
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.hcl
+      pop: true
+    - match: '.'
+      scope: comment.block.hcl
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.hcl
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.hcl
+    - match: '.'
+      scope: string.quoted.double.hcl

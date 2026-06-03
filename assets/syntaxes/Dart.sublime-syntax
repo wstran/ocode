@@ -1,0 +1,54 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Dart highlighting.
+name: Dart
+file_extensions:
+  - dart
+scope: source.dart
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.dart
+    - match: '/\*'
+      scope: punctuation.definition.comment.dart
+      push: block_comment
+    - match: 'r?"'
+      scope: punctuation.definition.string.begin.dart
+      push: double_string
+    - match: "r?'"
+      scope: punctuation.definition.string.begin.dart
+      push: single_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.dart
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.dart
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.dart
+    - match: '\b(this|super)\b'
+      scope: variable.language.dart
+    - match: '\b(abstract|as|assert|async|await|break|case|catch|class|const|continue|covariant|default|deferred|do|dynamic|else|enum|export|extends|extension|external|factory|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|on|operator|part|rethrow|return|set|show|static|switch|sync|throw|try|typedef|var|void|while|with|yield|sealed|base|when|required)\b'
+      scope: keyword.control.dart
+    - match: '\b(int|double|num|bool|String|List|Map|Set|Iterable|Future|Stream|Object|Symbol|Type|Record)\b'
+      scope: storage.type.dart
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.dart
+      pop: true
+    - match: '.'
+      scope: comment.block.dart
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.dart
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.dart
+    - match: '.'
+      scope: string.quoted.double.dart
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.dart
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.dart
+    - match: '.'
+      scope: string.quoted.single.dart

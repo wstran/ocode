@@ -1,0 +1,38 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Scilla (Zilliqa) highlighting.
+# Block comments are (* ... *); there are no line comments.
+name: Scilla
+file_extensions:
+  - scilla
+scope: source.scilla
+contexts:
+  main:
+    - match: '\(\*'
+      scope: punctuation.definition.comment.scilla
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.scilla
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.scilla
+    - match: '\b(True|False)\b'
+      scope: constant.language.scilla
+    - match: '\b(scilla_version|contract|library|import|field|transition|procedure|end|let|match|with|map|list|option|pair|fun|forall|In|Pair|Some|None|Nil|Cons|accept|send|event|call|delete|throw|exists|builtin)\b'
+      scope: keyword.control.scilla
+    - match: '\b(Int32|Int64|Int128|Int256|Uint32|Uint64|Uint128|Uint256|String|ByStr|ByStr20|ByStr32|BNum|Bool|Map|List|Option|Pair|Address|Event|Message)\b'
+      scope: storage.type.scilla
+  block_comment:
+    - match: '\*\)'
+      scope: punctuation.definition.comment.scilla
+      pop: true
+    - match: '.'
+      scope: comment.block.scilla
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.scilla
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.scilla
+    - match: '.'
+      scope: string.quoted.double.scilla

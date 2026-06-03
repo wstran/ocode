@@ -1,0 +1,34 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal TEAL (Algorand) highlighting.
+name: TEAL
+file_extensions:
+  - teal
+scope: source.teal
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.teal
+    - match: '"'
+      scope: punctuation.definition.string.begin.teal
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.teal
+    - match: '^\s*#pragma\b.*$'
+      scope: keyword.control.directive.teal
+    - match: '\b(int|byte|addr|method)\b'
+      scope: storage.type.teal
+    - match: '\b(txn|txna|txnas|gtxn|gtxna|gtxns|gtxnsa|global|gload|gloads|app_global_get|app_global_put|app_global_del|app_local_get|app_local_put|app_local_del|app_global_get_ex|app_local_get_ex|app_opted_in|asset_holding_get|asset_params_get|app_params_get|balance|min_balance)\b'
+      scope: support.function.builtin.teal
+    - match: '\b(pop|dup|dup2|dig|cover|uncover|swap|select|push|pushint|pushbytes|assert|err|sha256|sha512_256|keccak256|ed25519verify|ecdsa_verify|ecdsa_pk_recover|ecdsa_pk_decompress|bnz|bz|b|callsub|retsub|return|store|load|stores|loads|len|itob|btoi|concat|substring|substring3|getbyte|setbyte|getbit|setbit|extract|extract3|extract_uint16|extract_uint32|extract_uint64|log|itxn_begin|itxn_field|itxn_submit|itxn_next|itxn|itxna|itxnas|sqrt|exp|expw|mulw|divw|divmodw|addw|shl|shr|bzero|bitlen)\b'
+      scope: support.function.instruction.teal
+    - match: '^[A-Za-z_][A-Za-z0-9_]*:'
+      scope: entity.name.label.teal
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.teal
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.teal
+    - match: '.'
+      scope: string.quoted.double.teal

@@ -1,0 +1,33 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Clarity (Stacks/Bitcoin) highlighting.
+# Lisp-like; comments are ;; (line).
+name: Clarity
+file_extensions:
+  - clar
+scope: source.clarity
+contexts:
+  main:
+    - match: ';;.*$'
+      scope: comment.line.double-semicolon.clarity
+    - match: '"'
+      scope: punctuation.definition.string.begin.clarity
+      push: double_string
+    - match: '\bu?\d[\d_]*\b'
+      scope: constant.numeric.clarity
+    - match: "'[A-Z][A-Z0-9]+(\\.[A-Za-z-][A-Za-z0-9-]*)?"
+      scope: constant.other.principal.clarity
+    - match: '\b(true|false|none|some|ok|err)\b'
+      scope: constant.language.clarity
+    - match: '\b(define-public|define-private|define-read-only|define-data-var|define-map|define-fungible-token|define-non-fungible-token|define-constant|define-trait|use-trait|impl-trait|let|if|asserts!|begin|try!|unwrap!|unwrap-err!|unwrap-panic|at-block|print|get-block-info\?|var-get|var-set|map-get\?|map-set|map-delete|map-insert|and|or|not|is-eq|is-some|is-none|is-ok|is-err|stx-transfer\?|stx-burn\?|ft-transfer\?|ft-mint\?|ft-burn\?|nft-transfer\?|nft-mint\?|nft-burn\?|contract-call\?|as-contract|tx-sender|contract-caller|block-height|burn-block-height|chain-id|stx-account|sha256|sha512|keccak256|hash160|secp256k1-recover\?|secp256k1-verify|mod|pow|sqrti|log2|xor|to-int|to-uint|append|concat|element-at|index-of|len|fold|map|filter|merge|tuple|get|tuple|principal-of\?|stx-get-balance|stx-liquid-supply)\b'
+      scope: keyword.control.clarity
+    - match: '\b(int|uint|bool|principal|buff|string-ascii|string-utf8|list|tuple|optional|response)\b'
+      scope: storage.type.clarity
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.clarity
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.clarity
+    - match: '.'
+      scope: string.quoted.double.clarity

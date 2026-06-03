@@ -1,0 +1,34 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal VHDL highlighting.
+# Note: VHDL comments are `--` (line) — there are no /* */ block comments.
+name: VHDL
+file_extensions:
+  - vhd
+  - vhdl
+scope: source.vhdl
+contexts:
+  main:
+    - match: '--.*$'
+      scope: comment.line.double-dash.vhdl
+    - match: '"'
+      scope: punctuation.definition.string.begin.vhdl
+      push: double_string
+    - match: "'.'"
+      scope: string.quoted.single.vhdl
+    - match: '\b\d+(\.\d+)?([eE][+-]?\d+)?\b'
+      scope: constant.numeric.vhdl
+    - match: '(?i)\b(true|false|null)\b'
+      scope: constant.language.vhdl
+    - match: '(?i)\b(architecture|begin|block|body|case|component|configuration|end|entity|else|elsif|file|for|function|generate|generic|if|is|library|loop|next|of|others|package|port|process|procedure|record|return|select|signal|subtype|then|to|type|until|use|variable|wait|when|while|with|attribute|assert|constant|downto|in|inout|out|buffer|access|alias|all|exit|map|new|register|reject|report|severity|shared|impure|pure|range|after|guarded|disconnect|on|open|transport|inertial|bus|unaffected|protected|group|label|literal|nature|terminal|tolerance|across|through|spectrum|noise|break)\b'
+      scope: keyword.control.vhdl
+    - match: '(?i)\b(and|or|nand|nor|xor|xnor|not|mod|rem|abs|rol|ror|sla|sll|sra|srl)\b'
+      scope: keyword.operator.vhdl
+    - match: '(?i)\b(bit|bit_vector|boolean|character|integer|natural|positive|real|string|std_logic|std_logic_vector|std_ulogic|std_ulogic_vector|unsigned|signed|time|delay_length|severity_level|file_open_kind|file_open_status)\b'
+      scope: storage.type.vhdl
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.vhdl
+      pop: true
+    - match: '.'
+      scope: string.quoted.double.vhdl

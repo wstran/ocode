@@ -1,0 +1,35 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Zig highlighting.
+# Note: Zig has no /* */ block comments; only //, /// (doc) and //! (top doc).
+name: Zig
+file_extensions:
+  - zig
+scope: source.zig
+contexts:
+  main:
+    - match: '//[/!]?.*$'
+      scope: comment.line.double-slash.zig
+    - match: '"'
+      scope: punctuation.definition.string.begin.zig
+      push: double_string
+    - match: "'.'"
+      scope: string.quoted.single.zig
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: support.function.builtin.zig
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.zig
+    - match: '\b(true|false|null|undefined)\b'
+      scope: constant.language.zig
+    - match: '\b(const|var|fn|pub|extern|export|comptime|defer|errdefer|return|break|continue|if|else|switch|while|for|try|catch|struct|enum|union|opaque|error|packed|align|linksection|threadlocal|noinline|inline|asm|volatile|callconv|async|await|suspend|nosuspend|resume|usingnamespace|test|unreachable|orelse|and|or|anyframe|anytype)\b'
+      scope: keyword.control.zig
+    - match: '\b(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f16|f32|f64|f128|bool|void|noreturn|type|anyerror|anyopaque|c_int|c_uint|c_long|c_ulong|c_void|c_char|c_short)\b'
+      scope: storage.type.zig
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.zig
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.zig
+    - match: '.'
+      scope: string.quoted.double.zig

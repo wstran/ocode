@@ -1,0 +1,35 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Pact (Kadena) highlighting.
+# Lisp-like; comments are ;; (line).
+name: Pact
+file_extensions:
+  - pact
+scope: source.pact
+contexts:
+  main:
+    - match: ';;.*$'
+      scope: comment.line.double-semicolon.pact
+    - match: '"'
+      scope: punctuation.definition.string.begin.pact
+      push: double_string
+    - match: '\b\d[\d_]*(\.[\d_]+)?\b'
+      scope: constant.numeric.pact
+    - match: '\b(true|false)\b'
+      scope: constant.language.pact
+    - match: ":[A-Za-z][A-Za-z0-9_-]*"
+      scope: constant.other.keyword.pact
+    - match: "'[A-Za-z][A-Za-z0-9_-]*"
+      scope: constant.other.symbol.pact
+    - match: '\b(module|defun|defcap|defconst|defschema|deftable|defpact|defproperty|interface|implements|use|let|let\*|if|cond|and|or|not|at|with-read|with-default-read|insert|update|read|create-table|format|format-time|enforce|enforce-one|enforce-keyset|enforce-capability|require-capability|install-capability|with-capability|compose-capability|emit-event|ok|err|bind|resume|continue|step|step-with-rollback|lambda|map|filter|fold|reverse|sort|take|drop|length|contains|where|select|str-to-int|str-to-list|str-to-decimal|hash|describe-module|list-modules|describe-table|read-msg|chain-data|chain-id|block-height|block-time|tx-hash|tx-sender|sender)\b'
+      scope: keyword.control.pact
+    - match: '\b(integer|decimal|string|bool|list|table|object|guard|time|keyset|module)\b'
+      scope: storage.type.pact
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.pact
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.pact
+    - match: '.'
+      scope: string.quoted.double.pact

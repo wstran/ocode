@@ -1,0 +1,52 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Protocol Buffers (proto3) highlighting.
+name: Protocol Buffers
+file_extensions:
+  - proto
+scope: source.proto
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.proto
+    - match: '/\*'
+      scope: punctuation.definition.comment.proto
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.proto
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.proto
+      push: single_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
+      scope: constant.numeric.proto
+    - match: '\b(true|false)\b'
+      scope: constant.language.proto
+    - match: '\b(syntax|import|package|option|service|rpc|returns|message|enum|oneof|reserved|extensions|extend|group|public|weak|stream)\b'
+      scope: keyword.control.proto
+    - match: '\b(repeated|optional|required|map)\b'
+      scope: storage.modifier.proto
+    - match: '\b(double|float|int32|int64|uint32|uint64|sint32|sint64|fixed32|fixed64|sfixed32|sfixed64|bool|string|bytes)\b'
+      scope: storage.type.proto
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.proto
+      pop: true
+    - match: '.'
+      scope: comment.block.proto
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.proto
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.proto
+    - match: '.'
+      scope: string.quoted.double.proto
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.proto
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.proto
+    - match: '.'
+      scope: string.quoted.single.proto

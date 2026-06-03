@@ -1,0 +1,39 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Tact (TON) highlighting.
+name: Tact
+file_extensions:
+  - tact
+scope: source.tact
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.tact
+    - match: '/\*'
+      scope: punctuation.definition.comment.tact
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.tact
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
+      scope: constant.numeric.tact
+    - match: '\b(true|false|null|self)\b'
+      scope: constant.language.tact
+    - match: '\b(contract|fun|get|message|struct|trait|extends|with|import|asm|if|else|while|repeat|until|try|catch|let|const|init|receive|bounced|external|override|virtual|native|abstract|return|public|initOf|as|do|foreach|in|primitive)\b'
+      scope: keyword.control.tact
+    - match: '\b(Int|Bool|String|Slice|Cell|Builder|Address|Map|Option|StringBuilder)\b'
+      scope: storage.type.tact
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.tact
+      pop: true
+    - match: '.'
+      scope: comment.block.tact
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.tact
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.tact
+    - match: '.'
+      scope: string.quoted.double.tact

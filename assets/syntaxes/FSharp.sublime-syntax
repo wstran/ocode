@@ -1,0 +1,62 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal F# highlighting.
+# Block comments are (* ... *) — not /* */.
+name: F#
+file_extensions:
+  - fs
+  - fsx
+  - fsi
+scope: source.fsharp
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.fsharp
+    - match: '\(\*'
+      scope: punctuation.definition.comment.fsharp
+      push: block_comment
+    - match: '"""'
+      scope: punctuation.definition.string.begin.fsharp
+      push: block_string
+    - match: '@"'
+      scope: punctuation.definition.string.begin.fsharp
+      push: verbatim_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.fsharp
+      push: double_string
+    - match: "'.'"
+      scope: string.quoted.single.fsharp
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?[uUlLfFmMyYsSnL]?)\b'
+      scope: constant.numeric.fsharp
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.fsharp
+    - match: '\b(let|mutable|rec|and|use|in|if|then|else|elif|match|with|when|fun|function|do|done|return|yield|namespace|module|open|type|abstract|member|interface|inherit|override|default|new|static|private|public|internal|of|as|upcast|downcast|lazy|assert|global|try|finally|raise|begin|end|while|for|to|downto|failwith|select|where|group|join|on|into|orderby|or|by)\b'
+      scope: keyword.control.fsharp
+    - match: '\b(int|int8|int16|int32|int64|uint|uint8|uint16|uint32|uint64|float|float32|double|decimal|bool|string|char|byte|sbyte|unit|obj|Option|Result|List|Map|Set|Array|seq|Seq|IEnumerable)\b'
+      scope: storage.type.fsharp
+  block_comment:
+    - match: '\*\)'
+      scope: punctuation.definition.comment.fsharp
+      pop: true
+    - match: '.'
+      scope: comment.block.fsharp
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.fsharp
+      pop: true
+    - match: '.'
+      scope: string.quoted.block.fsharp
+  verbatim_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.fsharp
+      pop: true
+    - match: '.'
+      scope: string.quoted.verbatim.fsharp
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.fsharp
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.fsharp
+    - match: '.'
+      scope: string.quoted.double.fsharp

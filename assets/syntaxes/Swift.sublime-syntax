@@ -1,0 +1,54 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Swift highlighting.
+name: Swift
+file_extensions:
+  - swift
+scope: source.swift
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.swift
+    - match: '/\*'
+      scope: punctuation.definition.comment.swift
+      push: block_comment
+    - match: '"""'
+      scope: punctuation.definition.string.begin.swift
+      push: block_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.swift
+      push: double_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.swift
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.swift
+    - match: '\b(true|false|nil)\b'
+      scope: constant.language.swift
+    - match: '\b(self|super|Self)\b'
+      scope: variable.language.swift
+    - match: '\b(class|struct|enum|protocol|extension|func|var|let|if|else|guard|switch|case|default|for|in|while|repeat|do|try|catch|throw|throws|rethrows|return|break|continue|defer|fallthrough|import|open|public|internal|fileprivate|private|static|final|lazy|weak|unowned|mutating|nonmutating|convenience|required|dynamic|optional|indirect|override|init|deinit|subscript|typealias|associatedtype|where|as|is|some|any|await|async|actor|isolated|nonisolated|borrowing|consuming|inout|operator|precedencegroup|infix|prefix|postfix)\b'
+      scope: keyword.control.swift
+    - match: '\b(Int|UInt|Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Float|Double|String|Bool|Character|Optional|Array|Dictionary|Set|Void|Any|AnyObject)\b'
+      scope: storage.type.swift
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.swift
+      pop: true
+    - match: '.'
+      scope: comment.block.swift
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.swift
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.swift
+    - match: '.'
+      scope: string.quoted.block.swift
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.swift
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.swift
+    - match: '.'
+      scope: string.quoted.double.swift

@@ -1,0 +1,64 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Kotlin highlighting.
+name: Kotlin
+file_extensions:
+  - kt
+  - kts
+scope: source.kotlin
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.kotlin
+    - match: '/\*'
+      scope: punctuation.definition.comment.kotlin
+      push: block_comment
+    - match: '"""'
+      scope: punctuation.definition.string.begin.kotlin
+      push: block_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.kotlin
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.kotlin
+      push: single_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.annotation.kotlin
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?[fFLuU]?)\b'
+      scope: constant.numeric.kotlin
+    - match: '\b(true|false|null)\b'
+      scope: constant.language.kotlin
+    - match: '\b(this|super)\b'
+      scope: variable.language.kotlin
+    - match: '\b(fun|val|var|class|object|interface|enum|sealed|data|inner|companion|if|else|when|while|do|for|in|return|throw|try|catch|finally|break|continue|by|lazy|lateinit|out|reified|suspend|operator|infix|inline|noinline|crossinline|tailrec|const|package|import|as|is|typealias|public|private|protected|internal|abstract|final|open|override|init|where|annotation|external|vararg|expect|actual)\b'
+      scope: keyword.control.kotlin
+    - match: '\b(Int|Long|Short|Byte|Float|Double|Boolean|Char|String|Unit|Nothing|Any|Array|List|Set|Map|MutableList|MutableMap|MutableSet|Pair|Triple|Sequence|Iterable)\b'
+      scope: storage.type.kotlin
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.kotlin
+      pop: true
+    - match: '.'
+      scope: comment.block.kotlin
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.kotlin
+      pop: true
+    - match: '.'
+      scope: string.quoted.block.kotlin
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.kotlin
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.kotlin
+    - match: '.'
+      scope: string.quoted.double.kotlin
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.kotlin
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.kotlin
+    - match: '.'
+      scope: string.quoted.single.kotlin

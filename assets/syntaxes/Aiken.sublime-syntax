@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Aiken (Cardano) highlighting.
+name: Aiken
+file_extensions:
+  - ak
+scope: source.aiken
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.aiken
+    - match: '/\*'
+      scope: punctuation.definition.comment.aiken
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.aiken
+      push: double_string
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: support.function.builtin.aiken
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.aiken
+    - match: '\b(True|False|None|Some|Ok|Error|Void)\b'
+      scope: constant.language.aiken
+    - match: '\b(pub|fn|let|if|else|when|is|type|opaque|expect|trace|use|as|test|todo|error|and|or|not|in|validator|spend|mint|withdraw|publish|propose|vote|when|is)\b'
+      scope: keyword.control.aiken
+    - match: '\b(Int|Bool|ByteArray|String|List|Tuple|Option|Result|Data|Pair|Pairs|Dict|Map|Hash|Posix|Time)\b'
+      scope: storage.type.aiken
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.aiken
+      pop: true
+    - match: '.'
+      scope: comment.block.aiken
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.aiken
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.aiken
+    - match: '.'
+      scope: string.quoted.double.aiken

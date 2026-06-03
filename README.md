@@ -19,7 +19,7 @@ code — the only chrome is one status line at the bottom.
 - **Real undo/redo** — word-granular; "unsaved" means the text actually differs from disk.
 - **Watches the file** — auto-reloads external changes when clean, warns when not.
 - **Images & binaries** — views PNG/JPEG/… inline in Ghostty; other binaries show a hex preview, never an error.
-- **15 themes, 93 languages** — incl. TypeScript + a deep web3/ZK stack (Solidity, Vyper, Yul, Huff, Move, Cairo, Noir, Circom, ZoKrates, Sway, Cadence, Leo, Lean); add your own `.tmTheme` or `.sublime-syntax`.
+- **15 themes, 118 languages** — TypeScript + a deep web3/ZK stack, mobile (Swift, Kotlin, Dart), HDL (Verilog, VHDL), Assembly, WebAssembly, plus the usual web/AI/DevOps; add your own `.tmTheme` or `.sublime-syntax`.
 
 ## Install
 
@@ -111,11 +111,22 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 
 ## Languages
 
-**93 languages** out of the box — including **TypeScript** (`.ts` `.tsx` `.mts`
-`.cts`) and a deep **web3 / ZK stack**: Solidity, Vyper, Yul, Huff, Move, Cairo,
-Noir, Circom, ZoKrates, Sway, Cadence, Leo, Lean. Plus TOML, `.env`, INI and
-Dockerfile. `.mjs`, `.cjs` and `.jsx` highlight as JavaScript. Add any
-`.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
+**118 languages** out of the box. Highlights:
+
+- **TypeScript** (`.ts/.tsx/.mts/.cts`); `.mjs/.cjs/.jsx` open as JavaScript.
+- **Schemas / config / infra**: Protocol Buffers, GraphQL, TOML, `.env`, INI,
+  Dockerfile, HCL/Terraform, Nix, Bicep.
+- **Web3 / ZK**: Solidity, Vyper, Yul, Huff, Move, Cairo, Noir, Circom,
+  ZoKrates, Sway, Cadence, Leo, Lean — plus Tact, FunC (TON), Clarity (Stacks),
+  Aiken (Cardano), LIGO (Tezos), Pact (Kadena), TEAL (Algorand), Scilla.
+- **Mobile / desktop**: Swift, Kotlin (`.kt/.kts`), Dart, F#, PowerShell.
+- **HDL / asm / wasm**: Verilog/SystemVerilog, VHDL, Assembly (NASM/AT&T),
+  WebAssembly text (`.wat/.wast`).
+- **Modern systems / AI**: Zig, Elixir, Julia.
+- **Web supersets** (alias): `.vue/.svelte/.astro → HTML`, `.scss/.sass/.less
+  → CSS`, `.mdx → Markdown`.
+
+Add any `.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
 
 ## Images & other files
 

@@ -1,0 +1,41 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal FunC (TON) highlighting.
+# Comments are ;; (line) and {- ... -} (block).
+name: FunC
+file_extensions:
+  - fc
+  - func
+scope: source.func
+contexts:
+  main:
+    - match: ';;.*$'
+      scope: comment.line.double-semicolon.func
+    - match: '\{-'
+      scope: punctuation.definition.comment.func
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.func
+      push: double_string
+    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*)\b'
+      scope: constant.numeric.func
+    - match: '\b(true|false|nil)\b'
+      scope: constant.language.func
+    - match: '\b(impure|inline|inline_ref|method_id|include|pragma|asm|if|elseif|else|while|repeat|until|do|return|ifnot|forall|var|global|const)\b'
+      scope: keyword.control.func
+    - match: '\b(int|cell|slice|tuple|cont|builder)\b'
+      scope: storage.type.func
+  block_comment:
+    - match: '-\}'
+      scope: punctuation.definition.comment.func
+      pop: true
+    - match: '.'
+      scope: comment.block.func
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.func
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.func
+    - match: '.'
+      scope: string.quoted.double.func

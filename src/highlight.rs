@@ -47,13 +47,50 @@ const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/Huff.sublime-syntax"),
     include_str!("../assets/syntaxes/ZoKrates.sublime-syntax"),
     include_str!("../assets/syntaxes/Lean.sublime-syntax"),
+    include_str!("../assets/syntaxes/Proto.sublime-syntax"),
+    include_str!("../assets/syntaxes/GraphQL.sublime-syntax"),
+    include_str!("../assets/syntaxes/HCL.sublime-syntax"),
+    include_str!("../assets/syntaxes/Nix.sublime-syntax"),
+    include_str!("../assets/syntaxes/Swift.sublime-syntax"),
+    include_str!("../assets/syntaxes/Kotlin.sublime-syntax"),
+    include_str!("../assets/syntaxes/Dart.sublime-syntax"),
+    include_str!("../assets/syntaxes/Julia.sublime-syntax"),
+    include_str!("../assets/syntaxes/Verilog.sublime-syntax"),
+    include_str!("../assets/syntaxes/VHDL.sublime-syntax"),
+    include_str!("../assets/syntaxes/Assembly.sublime-syntax"),
+    include_str!("../assets/syntaxes/WebAssembly.sublime-syntax"),
+    include_str!("../assets/syntaxes/Zig.sublime-syntax"),
+    include_str!("../assets/syntaxes/Elixir.sublime-syntax"),
+    include_str!("../assets/syntaxes/FSharp.sublime-syntax"),
+    include_str!("../assets/syntaxes/PowerShell.sublime-syntax"),
+    include_str!("../assets/syntaxes/Bicep.sublime-syntax"),
+    include_str!("../assets/syntaxes/Tact.sublime-syntax"),
+    include_str!("../assets/syntaxes/FunC.sublime-syntax"),
+    include_str!("../assets/syntaxes/Clarity.sublime-syntax"),
+    include_str!("../assets/syntaxes/Aiken.sublime-syntax"),
+    include_str!("../assets/syntaxes/LIGO.sublime-syntax"),
+    include_str!("../assets/syntaxes/Pact.sublime-syntax"),
+    include_str!("../assets/syntaxes/Teal.sublime-syntax"),
+    include_str!("../assets/syntaxes/Scilla.sublime-syntax"),
 ];
 
 /// Variant extensions of a language syntect knows under a different one — mapped
-/// to that base so `.mjs`/`.cjs`/`.jsx` light up as JavaScript.
+/// to that base so e.g. `.mjs/.cjs/.jsx` light up as JavaScript and the
+/// JSON-with-comments family falls back to JSON.
 fn alias_extension(ext: &str) -> Option<&'static str> {
     match ext {
         "mjs" | "cjs" | "jsx" => Some("js"),
+
+        "jsonc" | "json5" => Some("json"),
+
+        // Web frameworks reuse the HTML grammar — they're HTML supersets.
+        "vue" | "svelte" | "astro" => Some("html"),
+
+        // CSS preprocessors highlight as CSS for the structural parts.
+        "scss" | "sass" | "less" => Some("css"),
+
+        // MDX is Markdown with embedded JSX — Markdown covers the bulk.
+        "mdx" => Some("md"),
 
         _ => None,
     }
@@ -181,6 +218,15 @@ impl SyntaxHighlighter {
     /// Resolve the syntax name for a path via its extension / file name so the
     /// cache can later look the syntax back up by name.
     pub fn syntax_name_for_path(&self, path: &Path) -> String {
+        // Variant extensions resolve to a base language — checked first so
+        // `.sass` opens as CSS (syntect's defaults wrongly claim it for Ruby
+        // Haml), and the JS/JSON/HTML family aliases keep their intent.
+        let by_alias = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(alias_extension)
+            .and_then(|base| self.syntax_set.find_syntax_by_extension(base));
+
         let by_ext = path
             .extension()
             .and_then(|e| e.to_str())
@@ -195,17 +241,10 @@ impl SyntaxHighlighter {
             .and_then(|n| n.strip_prefix('.'))
             .and_then(|n| self.syntax_set.find_syntax_by_extension(n));
 
-        // Variant extensions (.mjs/.cjs/.jsx) reuse the base language's syntax.
-        let by_alias = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .and_then(alias_extension)
-            .and_then(|base| self.syntax_set.find_syntax_by_extension(base));
-
-        by_ext
+        by_alias
+            .or(by_ext)
             .or(by_name)
             .or(by_dotfile)
-            .or(by_alias)
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
             .name
             .clone()
@@ -371,6 +410,49 @@ mod tests {
             ("Main.huff", "Huff"),
             ("circuit.zok", "ZoKrates"),
             ("Proof.lean", "Lean"),
+            ("api.proto", "Protocol Buffers"),
+            ("schema.graphql", "GraphQL"),
+            ("query.gql", "GraphQL"),
+            ("main.tf", "HCL"),
+            ("vars.tfvars", "HCL"),
+            ("config.hcl", "HCL"),
+            ("flake.nix", "Nix"),
+            // JSONC / JSON5 alias onto the built-in JSON grammar.
+            ("settings.jsonc", "JSON"),
+            ("tsconfig.json5", "JSON"),
+            ("App.swift", "Swift"),
+            ("main.kt", "Kotlin"),
+            ("build.gradle.kts", "Kotlin"),
+            ("main.dart", "Dart"),
+            ("script.jl", "Julia"),
+            ("top.v", "Verilog"),
+            ("top.sv", "Verilog"),
+            ("core.vhd", "VHDL"),
+            ("boot.asm", "Assembly"),
+            ("entry.S", "Assembly"),
+            ("module.wat", "WebAssembly"),
+            ("main.zig", "Zig"),
+            ("mod.ex", "Elixir"),
+            ("mod.exs", "Elixir"),
+            ("Lib.fs", "F#"),
+            ("script.ps1", "PowerShell"),
+            ("storage.bicep", "Bicep"),
+            ("jetton.tact", "Tact"),
+            ("wallet.fc", "FunC"),
+            ("counter.clar", "Clarity"),
+            ("validator.ak", "Aiken"),
+            ("contract.ligo", "LIGO"),
+            ("module.pact", "Pact"),
+            ("approval.teal", "TEAL"),
+            ("token.scilla", "Scilla"),
+            // Aliases for web superset / preprocessor / Markdown variants.
+            ("App.vue", "HTML"),
+            ("Counter.svelte", "HTML"),
+            ("index.astro", "HTML"),
+            ("style.scss", "CSS"),
+            ("style.sass", "CSS"),
+            ("style.less", "CSS"),
+            ("post.mdx", "Markdown"),
             // JS variants alias onto the built-in JavaScript grammar.
             ("server.mjs", "JavaScript"),
             ("config.cjs", "JavaScript"),
@@ -401,6 +483,31 @@ mod tests {
             ("#define macro MAIN() = takes(0) returns(0) { 0x00 mload }\n", "huff"),
             ("def main(field a) -> field { return a; }\n", "zok"),
             ("theorem t : 1 = 1 := by rfl -- proof\n", "lean"),
+            ("syntax = \"proto3\";\nmessage M { string name = 1; }\n", "proto"),
+            ("type Query { hello: String } # graphql\n", "graphql"),
+            ("resource \"r\" \"x\" { count = 1 # tf\n}\n", "tf"),
+            ("let pkgs = import <nixpkgs> {}; in pkgs.hello\n", "nix"),
+            ("import Foundation\nlet x: Int = 1 // c\nfunc f() -> String { return \"hi\" }\n", "swift"),
+            ("fun main(): Unit { val x: Int = 1; println(\"hi\") } // k\n", "kt"),
+            ("void main() { final x = 1; print('hi'); } // d\n", "dart"),
+            ("function f(x::Int)::Int\n  x + 1\nend # j\n", "jl"),
+            ("module m(input clk, output reg q); always @(posedge clk) q <= 1; endmodule\n", "v"),
+            ("entity e is port (a : in bit); end e; -- v\n", "vhd"),
+            ("section .text\nglobal _start\n_start: mov eax, 1 ; asm\n", "asm"),
+            ("(module (func (export \"f\") (result i32) i32.const 42)) ;; w\n", "wat"),
+            ("const std = @import(\"std\");\npub fn main() void { _ = std; } // z\n", "zig"),
+            ("defmodule M do\n  def hello, do: :world\nend # e\n", "ex"),
+            ("let add x y = x + y // f\n", "fs"),
+            ("function Get-Hello { param([string]$name); return \"hi $name\" }\n", "ps1"),
+            ("param name string\nresource s 'Microsoft.Storage/storageAccounts@2021-09-01' = { name: name }\n", "bicep"),
+            ("contract C { get fun greet(): String { return \"hi\"; } } // t\n", "tact"),
+            (";; func\n() main() impure { return 0; }\n", "fc"),
+            (";; clarity\n(define-public (greet) (ok \"hi\"))\n", "clar"),
+            ("// aiken\npub fn add(x: Int, y: Int) -> Int { x + y }\n", "ak"),
+            ("// ligo\nlet add = (x: int, y: int): int => x + y;\n", "ligo"),
+            (";; pact\n(defun greet () \"hello\")\n", "pact"),
+            ("#pragma version 6\nint 1\nreturn // teal\n", "teal"),
+            ("(* scilla *)\ncontract C() transition Hello() accept end\n", "scilla"),
         ] {
             let spans = h.highlight_block(code, ext, h.current);
 

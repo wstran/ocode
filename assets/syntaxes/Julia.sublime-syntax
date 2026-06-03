@@ -1,0 +1,53 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Julia highlighting.
+# Block comments use #= ... =# (not /* ... */).
+name: Julia
+file_extensions:
+  - jl
+scope: source.julia
+contexts:
+  main:
+    - match: '#='
+      scope: punctuation.definition.comment.julia
+      push: block_comment
+    - match: '#.*$'
+      scope: comment.line.number-sign.julia
+    - match: '"""'
+      scope: punctuation.definition.string.begin.julia
+      push: block_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.julia
+      push: double_string
+    - match: "'.'"
+      scope: string.quoted.single.julia
+    - match: '@[A-Za-z_][A-Za-z0-9_]*'
+      scope: support.function.macro.julia
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.julia
+    - match: '\b(true|false|nothing|missing)\b'
+      scope: constant.language.julia
+    - match: '\b(function|end|module|baremodule|using|import|export|if|elseif|else|for|while|do|let|begin|const|global|local|return|break|continue|try|catch|finally|struct|mutable|abstract|type|primitive|macro|quote|where|in|isa|as|outer)\b'
+      scope: keyword.control.julia
+    - match: '\b(Int|Int8|Int16|Int32|Int64|Int128|UInt|UInt8|UInt16|UInt32|UInt64|UInt128|Float16|Float32|Float64|Bool|String|Char|Symbol|Array|Vector|Matrix|Dict|Set|Tuple|NamedTuple|Number|Real|Complex|Function|Any|Nothing|Missing)\b'
+      scope: storage.type.julia
+  block_comment:
+    - match: '=#'
+      scope: punctuation.definition.comment.julia
+      pop: true
+    - match: '.'
+      scope: comment.block.julia
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.julia
+      pop: true
+    - match: '.'
+      scope: string.quoted.block.julia
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.julia
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.julia
+    - match: '.'
+      scope: string.quoted.double.julia

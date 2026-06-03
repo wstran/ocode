@@ -1,0 +1,63 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal Elixir highlighting.
+name: Elixir
+file_extensions:
+  - ex
+  - exs
+  - heex
+scope: source.elixir
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.elixir
+    - match: '"""'
+      scope: punctuation.definition.string.begin.elixir
+      push: block_string
+    - match: "'''"
+      scope: punctuation.definition.string.begin.elixir
+      push: charlist_block
+    - match: '"'
+      scope: punctuation.definition.string.begin.elixir
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.elixir
+      push: single_string
+    - match: '@[a-z_][A-Za-z0-9_?!]*'
+      scope: variable.annotation.elixir
+    - match: ':[A-Za-z_][A-Za-z0-9_?!]*'
+      scope: constant.other.symbol.elixir
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.elixir
+    - match: '\b(true|false|nil)\b'
+      scope: constant.language.elixir
+    - match: '\b(def|defp|defmodule|defprotocol|defimpl|defmacro|defmacrop|defstruct|defexception|defguard|defguardp|defdelegate|do|end|if|else|unless|case|cond|when|fn|alias|import|require|use|try|rescue|catch|after|raise|throw|with|for|receive|quote|unquote|and|or|not|in)\b'
+      scope: keyword.control.elixir
+  block_string:
+    - match: '"""'
+      scope: punctuation.definition.string.end.elixir
+      pop: true
+    - match: '.'
+      scope: string.quoted.block.elixir
+  charlist_block:
+    - match: "'''"
+      scope: punctuation.definition.string.end.elixir
+      pop: true
+    - match: '.'
+      scope: string.quoted.charlist.elixir
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.elixir
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.elixir
+    - match: '.'
+      scope: string.quoted.double.elixir
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.elixir
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.elixir
+    - match: '.'
+      scope: string.quoted.single.elixir

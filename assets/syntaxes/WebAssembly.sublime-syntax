@@ -1,0 +1,45 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). Minimal WebAssembly text format (WAT) highlighting.
+# Comments are ;; (line) and (; ... ;) (block) — S-expression style.
+name: WebAssembly
+file_extensions:
+  - wat
+  - wast
+scope: source.wat
+contexts:
+  main:
+    - match: ';;.*$'
+      scope: comment.line.double-semicolon.wat
+    - match: '\(;'
+      scope: punctuation.definition.comment.wat
+      push: block_comment
+    - match: '"'
+      scope: punctuation.definition.string.begin.wat
+      push: double_string
+    - match: '\$[A-Za-z_][A-Za-z0-9_$.]*'
+      scope: variable.parameter.wat
+    - match: '\b(0[xX][0-9a-fA-F_]+|-?\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)\b'
+      scope: constant.numeric.wat
+    - match: '\b(module|func|param|result|local|global|memory|data|table|elem|export|import|type|start|mut|offset|funcref|externref)\b'
+      scope: keyword.control.wat
+    - match: '\b((i32|i64|f32|f64|v128)\.(const|add|sub|mul|div|div_s|div_u|rem|rem_s|rem_u|and|or|xor|shl|shr|shr_s|shr_u|rotl|rotr|eq|ne|lt|lt_s|lt_u|le|le_s|le_u|gt|gt_s|gt_u|ge|ge_s|ge_u|eqz|abs|neg|sqrt|ceil|floor|trunc|nearest|min|max|copysign|load|store|load8_s|load8_u|load16_s|load16_u|store8|store16|convert_i32_s|convert_i32_u|convert_i64_s|convert_i64_u|trunc_f32_s|trunc_f32_u|trunc_f64_s|trunc_f64_u|reinterpret_f32|reinterpret_f64|reinterpret_i32|reinterpret_i64|extend_s|extend_u|wrap|promote|demote|popcnt|clz|ctz))\b'
+      scope: support.function.instruction.wat
+    - match: '\b(if|else|end|loop|block|br|br_if|br_table|call|call_indirect|return|select|drop|nop|unreachable|memory\.size|memory\.grow|memory\.copy|memory\.fill|local\.get|local\.set|local\.tee|global\.get|global\.set|then)\b'
+      scope: support.function.instruction.wat
+    - match: '\b(i32|i64|f32|f64|v128|funcref|externref|anyref)\b'
+      scope: storage.type.wat
+  block_comment:
+    - match: ';\)'
+      scope: punctuation.definition.comment.wat
+      pop: true
+    - match: '.'
+      scope: comment.block.wat
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.wat
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.wat
+    - match: '.'
+      scope: string.quoted.double.wat

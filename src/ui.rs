@@ -6,18 +6,28 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, Focus};
 use crate::buffer::Buffer;
+use crate::highlight::UiPalette;
 use crate::media::{self, BinaryDoc, Media};
 
 const TREE_WIDTH: u16 = 32;
-const STATUS_BG: Color = Color::Rgb(40, 44, 52);
-const GUTTER_FG: Color = Color::Rgb(92, 99, 112);
-const GUTTER_CUR: Color = Color::Rgb(171, 178, 191);
-const SEL_BG: Color = Color::Rgb(55, 62, 76);
-const SEL_HL: Color = Color::Rgb(54, 78, 120);
+
+// A fixed accent that reads as intentional UI on any dark theme. Text, dim and
+// selection are derived from the active theme instead (see UiPalette), so the
+// chrome tracks the code; no background is ever painted, so the terminal's own
+// background and any transparency show through, the status bar included.
 const ACCENT: Color = Color::Rgb(97, 175, 239);
-const TEXT_FG: Color = Color::Rgb(171, 178, 191);
+
+// Semantic status foregrounds: success, warning (unsaved / disk conflict) and
+// error. Mid-tones chosen to stay legible on any dark background.
+const OK: Color = Color::Rgb(152, 195, 121);
+const WARN: Color = Color::Rgb(209, 154, 102);
+const ERR: Color = Color::Rgb(224, 108, 117);
 
 const IS_MAC: bool = cfg!(target_os = "macos");
+
+/// A run of status-bar text with its own style. The bar is assembled from a
+/// list of these so each part (mode badge, path, warning) is colored on its own.
+type Seg = (String, Style);
 
 /// ASCII wordmark shown on the empty-state welcome screen, centered as a block.
 const LOGO: &[&str] = &[
@@ -50,11 +60,15 @@ const PREVIEW: &str = concat!(
 pub fn render(frame: &mut Frame, app: &mut App) {
     let root = frame.area();
 
-    if app.picker.is_some() {
-        render_picker(frame, app, root);
+    if let Some(sel) = app.picker {
+        let pal = app.highlighter.ui_palette_for(sel);
+
+        render_picker(frame, app, root, pal);
 
         return;
     }
+
+    let pal = app.highlighter.ui_palette();
 
     let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(root);
 
@@ -65,19 +79,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let editor_area = if app.tree_visible {
         let cols = Layout::horizontal([Constraint::Length(TREE_WIDTH), Constraint::Min(0)]).split(main);
 
-        render_tree(frame, app, cols[0]);
+        render_tree(frame, app, cols[0], pal);
 
         cols[1]
     } else {
         main
     };
 
-    render_editor(frame, app, editor_area);
+    render_editor(frame, app, editor_area, pal);
 
-    render_status(frame, app, status_area);
+    render_status(frame, app, status_area, pal);
 }
 
-fn render_picker(frame: &mut Frame, app: &App, area: Rect) {
+fn render_picker(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     let sel = app.picker.unwrap_or(0);
 
     let count = app.highlighter.theme_count();
@@ -98,14 +112,14 @@ fn render_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let cols = Layout::horizontal([Constraint::Length(30), Constraint::Min(0)]).split(rows[1]);
 
-    render_theme_list(frame, app, cols[0], sel, count);
+    render_theme_list(frame, app, cols[0], sel, count, pal);
 
-    render_preview(frame, app, cols[1], sel);
+    render_preview(frame, app, cols[1], sel, pal);
 
-    render_picker_footer(frame, rows[2], count);
+    render_picker_footer(frame, rows[2], count, pal);
 }
 
-fn render_theme_list(frame: &mut Frame, app: &App, area: Rect, sel: usize, count: usize) {
+fn render_theme_list(frame: &mut Frame, app: &App, area: Rect, sel: usize, count: usize, pal: UiPalette) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
@@ -135,10 +149,10 @@ fn render_theme_list(frame: &mut Frame, app: &App, area: Rect, sel: usize, count
 
             let marker = if i == sel { "› " } else { "  " };
 
-            let mut style = Style::default().fg(TEXT_FG);
+            let mut style = Style::default().fg(pal.fg);
 
             if i == sel {
-                style = style.bg(SEL_BG).add_modifier(Modifier::BOLD);
+                style = style.bg(pal.selection).add_modifier(Modifier::BOLD);
             }
 
             Line::from(Span::styled(format!("{marker}{name}"), style))
@@ -148,14 +162,14 @@ fn render_theme_list(frame: &mut Frame, app: &App, area: Rect, sel: usize, count
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_preview(frame: &mut Frame, app: &App, area: Rect, sel: usize) {
+fn render_preview(frame: &mut Frame, app: &App, area: Rect, sel: usize, pal: UiPalette) {
     let names = app.highlighter.theme_names();
 
     let tag = if app.highlighter.theme_is_dark(sel) { "dark" } else { "light" };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(GUTTER_FG))
+        .border_style(Style::default().fg(pal.dim))
         .title(format!(" Preview · {} · {tag} ", names.get(sel).copied().unwrap_or("")));
 
     let inner = block.inner(area);
@@ -172,7 +186,7 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect, sel: usize) {
         .map(|(i, spans)| {
             let mut out = vec![Span::styled(
                 format!("{:>num_w$} ", i + 1),
-                Style::default().fg(GUTTER_FG),
+                Style::default().fg(pal.dim),
             )];
 
             out.extend(spans.iter().map(|(style, text)| Span::styled(text.clone(), *style)));
@@ -186,12 +200,12 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect, sel: usize) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_picker_footer(frame: &mut Frame, area: Rect, count: usize) {
+fn render_picker_footer(frame: &mut Frame, area: Rect, count: usize, pal: UiPalette) {
     let word_jump = if IS_MAC { "⌥+←/→" } else { "Ctrl+←/→" };
 
     let keys = Line::from(Span::styled(
         "  ↑/↓ select     Enter apply & save     Esc quit",
-        Style::default().fg(TEXT_FG),
+        Style::default().fg(pal.fg),
     ));
 
     let info = Line::from(Span::styled(
@@ -199,13 +213,13 @@ fn render_picker_footer(frame: &mut Frame, area: Rect, count: usize) {
             "  {count} styles · word-jump {word_jump} · add .tmTheme in {} · change later: ocode --style",
             crate::config::themes_dir_display()
         ),
-        Style::default().fg(GUTTER_FG),
+        Style::default().fg(pal.dim),
     ));
 
     frame.render_widget(Paragraph::new(vec![keys, info]), area);
 }
 
-fn render_tree(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_tree(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     let title = app
         .tree
         .root
@@ -217,9 +231,9 @@ fn render_tree(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Tree;
 
     let border_style = if focused {
-        Style::default().fg(Color::Rgb(97, 175, 239))
+        Style::default().fg(ACCENT)
     } else {
-        Style::default().fg(GUTTER_FG)
+        Style::default().fg(pal.dim)
     };
 
     let block = Block::default()
@@ -262,16 +276,12 @@ fn render_tree(frame: &mut Frame, app: &mut App, area: Rect) {
             "  "
         };
 
-        let fg = if node.is_dir {
-            Color::Rgb(97, 175, 239)
-        } else {
-            Color::Rgb(171, 178, 191)
-        };
+        let fg = if node.is_dir { ACCENT } else { pal.fg };
 
         let mut style = Style::default().fg(fg);
 
         if idx == app.tree.selected {
-            style = style.bg(SEL_BG).add_modifier(Modifier::BOLD);
+            style = style.bg(pal.selection).add_modifier(Modifier::BOLD);
         }
 
         let text = format!("{indent}{marker}{}", node.name);
@@ -283,7 +293,7 @@ fn render_tree(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// Centered logo + tagline shown when no file is open yet.
-fn render_welcome(frame: &mut Frame, area: Rect) {
+fn render_welcome(frame: &mut Frame, area: Rect, pal: UiPalette) {
     let width = area.width as usize;
 
     let logo_w = LOGO.iter().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -304,13 +314,13 @@ fn render_welcome(frame: &mut Frame, area: Rect) {
 
     content.push(Line::from(""));
 
-    content.push(centered(width, "a fast terminal code reader & editor", Style::default().fg(TEXT_FG)));
+    content.push(centered(width, "a fast terminal code reader & editor", Style::default().fg(pal.fg)));
 
     content.push(Line::from(""));
 
-    content.push(centered(width, "Enter or Ctrl+B  browse files        Ctrl+Q  quit", Style::default().fg(GUTTER_FG)));
+    content.push(centered(width, "Enter or Ctrl+B  browse files        Ctrl+Q  quit", Style::default().fg(pal.dim)));
 
-    content.push(centered(width, &format!("move with {nav}  ·  Ctrl+S save  ·  Ctrl+Z undo"), Style::default().fg(GUTTER_FG)));
+    content.push(centered(width, &format!("move with {nav}  ·  Ctrl+S save  ·  Ctrl+Z undo"), Style::default().fg(pal.dim)));
 
     let top = (area.height as usize).saturating_sub(content.len()) / 2;
 
@@ -327,15 +337,15 @@ fn centered(width: usize, text: &str, style: Style) -> Line<'static> {
     Line::from(Span::styled(format!("{pad}{text}"), style))
 }
 
-fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     if app.media.is_some() {
-        render_media(frame, app, area);
+        render_media(frame, app, area, pal);
 
         return;
     }
 
     let Some(buf) = app.buffer.as_mut() else {
-        render_welcome(frame, area);
+        render_welcome(frame, area, pal);
 
         return;
     };
@@ -376,9 +386,9 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
         }
 
         let num_style = if li == buf.cursor_line {
-            Style::default().fg(GUTTER_CUR)
+            Style::default().fg(pal.fg)
         } else {
-            Style::default().fg(GUTTER_FG)
+            Style::default().fg(pal.dim)
         };
 
         let gutter = Span::styled(format!("{:>w$} ", li + 1, w = num_w), num_style);
@@ -388,7 +398,7 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
         let sel = buf.selection_for_line(li);
 
         if let Some(cached) = buf.hl.line(li) {
-            spans.extend(slice_spans(cached, buf.scroll_col, text_width, sel));
+            spans.extend(slice_spans(cached, buf.scroll_col, text_width, sel, pal.selection));
         }
 
         lines.push(Line::from(spans));
@@ -405,7 +415,7 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_media(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_media(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     if matches!(app.media, Some(Media::Image(_))) {
         // The tree would overlap a kitty image, so hide the image while it is
         // open and tell the user how to view it.
@@ -414,7 +424,7 @@ fn render_media(frame: &mut Frame, app: &mut App, area: Rect) {
 
             let line = Line::from(Span::styled(
                 "  image — press Ctrl+B to hide the tree and view it",
-                Style::default().fg(GUTTER_FG),
+                Style::default().fg(pal.dim),
             ));
 
             frame.render_widget(Paragraph::new(line), area);
@@ -430,11 +440,11 @@ fn render_media(frame: &mut Frame, app: &mut App, area: Rect) {
     app.image_cells = None;
 
     if let Some(Media::Binary(doc)) = &app.media {
-        render_binary_info(frame, doc, area);
+        render_binary_info(frame, doc, area, pal);
     }
 }
 
-fn render_binary_info(frame: &mut Frame, doc: &BinaryDoc, area: Rect) {
+fn render_binary_info(frame: &mut Frame, doc: &BinaryDoc, area: Rect, pal: UiPalette) {
     let name = doc.path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
 
     let mut lines: Vec<Line> = vec![Line::from("")];
@@ -446,20 +456,20 @@ fn render_binary_info(frame: &mut Frame, doc: &BinaryDoc, area: Rect) {
 
     lines.push(Line::from(Span::styled(
         format!("  {} · {}", doc.format, media::human_size(doc.byte_len)),
-        Style::default().fg(TEXT_FG),
+        Style::default().fg(pal.fg),
     )));
 
     lines.push(Line::from(""));
 
     lines.push(Line::from(Span::styled(
         "  Not text — hex preview of the first bytes:",
-        Style::default().fg(GUTTER_FG),
+        Style::default().fg(pal.dim),
     )));
 
     lines.push(Line::from(""));
 
     for chunk in doc.head.chunks(16) {
-        lines.push(Line::from(Span::styled(hex_line(chunk), Style::default().fg(TEXT_FG))));
+        lines.push(Line::from(Span::styled(hex_line(chunk), Style::default().fg(pal.fg))));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
@@ -484,52 +494,54 @@ fn hex_line(chunk: &[u8]) -> String {
     format!("  {hex:<49}|{ascii}|")
 }
 
-fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    let conflict = app.search.is_none() && app.buffer.as_ref().is_some_and(|b| b.disk_changed);
-
-    let base = if conflict {
-        Style::default()
-            .bg(Color::Rgb(176, 132, 47))
-            .fg(Color::Rgb(24, 24, 24))
-            .add_modifier(Modifier::BOLD)
-    } else if app.status_ok {
-        Style::default()
-            .bg(Color::Rgb(63, 115, 74))
-            .fg(Color::Rgb(228, 240, 228))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().bg(STATUS_BG).fg(TEXT_FG)
-    };
-
+fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     let width = area.width as usize;
 
-    let (left, right) = if let Some(search) = &app.search {
-        (format!(" Find: {}", search.query), " Enter: next  Esc: close ".to_string())
+    let badge = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+
+    let text = Style::default().fg(pal.fg);
+
+    let dim = Style::default().fg(pal.dim);
+
+    let warn = Style::default().fg(WARN).add_modifier(Modifier::BOLD);
+
+    let conflict = app.search.is_none() && app.buffer.as_ref().is_some_and(|b| b.disk_changed);
+
+    let (left, right): (Vec<Seg>, Vec<Seg>) = if let Some(search) = &app.search {
+        (
+            vec![(" Find: ".to_string(), badge), (search.query.clone(), text)],
+            vec![(" Enter: next  Esc: close ".to_string(), dim)],
+        )
     } else if conflict {
         let buf = app.buffer.as_ref().unwrap();
 
-        let right = format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1);
-
         (
-            format!(" ⚠ {} changed on disk — Ctrl+R reload · Ctrl+S overwrite", buf.file_name()),
-            right,
+            vec![(
+                format!(" ⚠ {} changed on disk — Ctrl+R reload · Ctrl+S overwrite", buf.file_name()),
+                warn,
+            )],
+            vec![(format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), warn)],
         )
     } else if let Some(buf) = &app.buffer {
-        let dirty = if buf.modified { "*" } else { "" };
-
         let focus = if app.focus == Focus::Tree { "TREE" } else { "EDIT" };
 
-        let status = if app.status.is_empty() {
-            String::new()
-        } else {
-            format!("  {}", app.status)
-        };
+        let mut left = vec![
+            (format!(" [{focus}] "), badge),
+            (buf.path.display().to_string(), text),
+        ];
 
-        let left = format!(" [{focus}] {}{dirty}{status}", buf.path.display());
+        if buf.modified {
+            left.push(("*".to_string(), warn));
+        }
 
-        let right = format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1);
+        if !app.status.is_empty() {
+            left.push((format!("  {}", app.status), flash_style(app.status_ok)));
+        }
 
-        (left, right)
+        (
+            left,
+            vec![(format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), dim)],
+        )
     } else if let Some(m) = &app.media {
         let (path, info) = match m {
             Media::Image(d) => (
@@ -543,47 +555,105 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
             ),
         };
 
-        (format!(" [VIEW] {path}"), format!("{info} "))
+        (
+            vec![(" [VIEW] ".to_string(), badge), (path, text)],
+            vec![(format!("{info} "), dim)],
+        )
     } else {
-        let status = if app.status.is_empty() { "opencode" } else { &app.status };
+        let mut left = vec![(" [TREE] ".to_string(), badge)];
 
-        (format!(" [TREE] {status}"), String::new())
+        if app.status.is_empty() {
+            left.push(("opencode".to_string(), dim));
+        } else {
+            left.push((app.status.clone(), flash_style(app.status_ok)));
+        }
+
+        (left, Vec::new())
     };
 
-    frame.render_widget(Paragraph::new(compose_bar(&left, &right, width)).style(base), area);
+    frame.render_widget(Paragraph::new(compose_bar(&left, &right, width)), area);
 }
 
-/// Lay out a status bar that is exactly `width` columns: keep `right` pinned to
-/// the right edge and truncate `left` from its head (keeping the tail, e.g. the
-/// file name) when the two would not fit.
-fn compose_bar(left: &str, right: &str, width: usize) -> Line<'static> {
+/// Green for a success flash, red for a lingering error (see `App::flash` /
+/// `App::set_error`).
+fn flash_style(ok: bool) -> Style {
+    if ok {
+        Style::default().fg(OK).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(ERR)
+    }
+}
+
+/// Lay out a status bar exactly `width` columns wide from styled segments: pin
+/// `right` to the right edge and truncate `left` from its head (keeping the
+/// tail, e.g. the file name) when the two would not fit. No background is drawn,
+/// so the terminal's own background and any transparency show through.
+fn compose_bar(left: &[Seg], right: &[Seg], width: usize) -> Line<'static> {
     if width == 0 {
         return Line::default();
     }
 
-    let right_w = right.chars().count().min(width);
+    let right_w = seg_len(right).min(width);
 
     let avail = width - right_w;
 
-    let left_chars: Vec<char> = left.chars().collect();
+    let left_len = seg_len(left);
 
-    let left_fitted: String = if left_chars.len() <= avail {
-        let pad = avail - left_chars.len();
+    let mut spans: Vec<Span<'static>> = Vec::new();
 
-        format!("{left}{}", " ".repeat(pad))
-    } else if avail == 0 {
-        String::new()
-    } else {
-        let tail: String = left_chars[left_chars.len() - (avail - 1)..].iter().collect();
+    if left_len <= avail {
+        for (t, s) in left {
+            spans.push(Span::styled(t.clone(), *s));
+        }
 
-        format!("…{tail}")
-    };
+        spans.push(Span::raw(" ".repeat(avail - left_len)));
+    } else if avail > 0 {
+        spans.push(Span::raw("…"));
 
-    let right_chars: Vec<char> = right.chars().collect();
+        spans.extend(tail_spans(left, avail - 1));
+    }
 
-    let right_fitted: String = right_chars[right_chars.len() - right_w..].iter().collect();
+    spans.extend(tail_spans(right, right_w));
 
-    Line::from(format!("{left_fitted}{right_fitted}"))
+    Line::from(spans)
+}
+
+fn seg_len(segs: &[Seg]) -> usize {
+    segs.iter().map(|(t, _)| t.chars().count()).sum()
+}
+
+/// The last `keep` characters of a styled segment list, preserving each
+/// segment's style and splitting the boundary segment.
+fn tail_spans(segs: &[Seg], keep: usize) -> Vec<Span<'static>> {
+    if keep == 0 {
+        return Vec::new();
+    }
+
+    let skip = seg_len(segs).saturating_sub(keep);
+
+    let mut out: Vec<Span<'static>> = Vec::new();
+
+    let mut idx = 0;
+
+    for (text, style) in segs {
+        let seg_start = idx;
+
+        idx += text.chars().count();
+
+        if idx <= skip {
+            continue;
+        }
+
+        let start_in_seg = skip.saturating_sub(seg_start);
+
+        let kept: String = text.chars().skip(start_in_seg).collect();
+
+        if !kept.is_empty() {
+            out.push(Span::styled(kept, *style));
+        }
+    }
+
+    out
 }
 
 fn scroll_into_view(buf: &mut Buffer, height: usize, text_width: usize) {
@@ -613,6 +683,7 @@ fn slice_spans(
     start: usize,
     width: usize,
     sel: Option<(usize, usize)>,
+    sel_bg: Color,
 ) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
 
@@ -637,7 +708,7 @@ fn slice_spans(
             if col >= start {
                 let selected = sel.is_some_and(|(a, b)| col >= a && col < b);
 
-                let cell_style = if selected { style.bg(SEL_HL) } else { *style };
+                let cell_style = if selected { style.bg(sel_bg) } else { *style };
 
                 if chunk_style != Some(cell_style) {
                     flush_chunk(&mut out, &mut chunk, chunk_style);
@@ -672,6 +743,7 @@ mod tests {
 
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
 
     use crate::app::App;
 
@@ -700,6 +772,35 @@ mod tests {
         assert!(screen.contains("return name"), "second line missing");
 
         assert!(screen.contains("Ln 1, Col 1"), "status line missing");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn status_bar_paints_no_opaque_background() {
+        let path = std::env::temp_dir().join("opencode_status_bg.rs");
+
+        fs::write(&path, "fn main() {}\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        let (w, h) = (80u16, 6u16);
+
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        // The status bar is the last row; every cell must keep the terminal's
+        // own background (Reset) so transparency is preserved.
+        for x in 0..w {
+            let bg = buffer.cell((x, h - 1)).unwrap().bg;
+
+            assert_eq!(bg, Color::Reset, "status cell at x={x} paints an opaque background {bg:?}");
+        }
 
         let _ = fs::remove_file(path);
     }

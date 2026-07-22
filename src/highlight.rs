@@ -4,7 +4,8 @@ use std::path::Path;
 use ratatui::style::{Color, Modifier, Style};
 use ropey::Rope;
 use syntect::highlighting::{
-    FontStyle, HighlightIterator, HighlightState, Highlighter, Style as SynStyle, Theme, ThemeSet,
+    Color as SynColor, FontStyle, HighlightIterator, HighlightState, Highlighter, Style as SynStyle,
+    Theme, ThemeSet,
 };
 use syntect::parsing::{ParseState, ScopeStack, SyntaxDefinition, SyntaxSet};
 use syntect::util::LinesWithEndings;
@@ -179,6 +180,42 @@ impl SyntaxHighlighter {
     pub fn set_theme(&mut self, idx: usize) {
         if idx < self.themes.len() {
             self.current = idx;
+        }
+    }
+
+    /// Chrome colors derived from the active theme (see [`UiPalette`]).
+    pub fn ui_palette(&self) -> UiPalette {
+        self.ui_palette_for(self.current)
+    }
+
+    /// Chrome colors derived from theme `idx`, so the picker can preview a
+    /// theme's selection tint before it is applied.
+    pub fn ui_palette_for(&self, idx: usize) -> UiPalette {
+        let settings = &self.themes[idx.min(self.themes.len() - 1)].1.settings;
+
+        let raw_fg = settings
+            .foreground
+            .unwrap_or(SynColor { r: 171, g: 178, b: 191, a: 255 });
+
+        let bg = settings
+            .background
+            .unwrap_or(SynColor { r: 40, g: 44, b: 52, a: 255 });
+
+        // Some tmThemes set a muted global foreground and rely on per-scope
+        // colors for bright text; lift it to a readable floor on dark themes so
+        // chrome text never sinks into the background. Light themes keep their
+        // intentionally dark foreground.
+        let fg = ensure_readable(raw_fg, bg);
+
+        let selection = match settings.selection {
+            Some(sel) => flatten(sel, bg),
+            None => SynColor { r: 54, g: 78, b: 120, a: 255 },
+        };
+
+        UiPalette {
+            fg: syn_to_color(fg),
+            dim: syn_to_color(blend(fg, bg, 0.5)),
+            selection: syn_to_color(selection),
         }
     }
 
@@ -370,6 +407,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ui_palette_is_solid_and_readable() {
+        let h = SyntaxHighlighter::new();
+
+        for i in 0..h.theme_count() {
+            let p = h.ui_palette_for(i);
+
+            for c in [p.fg, p.dim, p.selection] {
+                assert!(matches!(c, Color::Rgb(..)), "chrome color must be solid rgb, got {c:?}");
+            }
+
+            assert_ne!(p.fg, p.dim, "dim must read as distinct from fg (theme {i})");
+
+            // On dark themes the primary chrome foreground must clear the
+            // readability floor so status/gutter text is never near-invisible.
+            if h.theme_is_dark(i) {
+                if let Color::Rgb(r, g, b) = p.fg {
+                    let lum = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
+
+                    assert!(lum >= 0.59, "dark-theme fg too dim: {:?} (lum {lum:.2})", p.fg);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn resolves_bundled_languages() {
         let h = SyntaxHighlighter::new();
 
@@ -545,4 +607,71 @@ fn load_user_themes(dir: &Path, themes: &mut Vec<(String, Theme)>) {
             themes.push((name, theme));
         }
     }
+}
+
+/// Colors for the app's own chrome (status text, gutter, selection), taken from
+/// the active theme so the UI tracks the code. Only foregrounds and a solid
+/// selection tint are derived; the terminal background is never painted.
+#[derive(Clone, Copy)]
+pub struct UiPalette {
+    pub fg: Color,
+
+    pub dim: Color,
+
+    pub selection: Color,
+}
+
+/// Perceived luminance in `0.0..=1.0` (Rec. 601 weights).
+fn luminance(c: SynColor) -> f32 {
+    (0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32) / 255.0
+}
+
+/// On a dark theme, lift `fg` toward white until it clears a readability floor;
+/// on a light theme, leave it (its dark foreground is correct on a light term).
+fn ensure_readable(fg: SynColor, bg: SynColor) -> SynColor {
+    const FLOOR: f32 = 0.6;
+
+    let is_dark = u32::from(bg.r) + u32::from(bg.g) + u32::from(bg.b) < 384;
+
+    let lum = luminance(fg);
+
+    if !is_dark || lum >= FLOOR {
+        return fg;
+    }
+
+    let white = SynColor { r: 255, g: 255, b: 255, a: 255 };
+
+    blend(fg, white, (FLOOR - lum) / (1.0 - lum))
+}
+
+/// Mix `a` toward `b` by `t` (0.0 keeps `a`, 1.0 becomes `b`).
+fn blend(a: SynColor, b: SynColor, t: f32) -> SynColor {
+    let mix = |x: u8, y: u8| (x as f32 * (1.0 - t) + y as f32 * t).round() as u8;
+
+    SynColor {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: 255,
+    }
+}
+
+/// Composite a translucent overlay over an opaque base into a solid color;
+/// tmTheme selection colors often carry alpha meant to blend over the theme
+/// background.
+fn flatten(over: SynColor, base: SynColor) -> SynColor {
+    let alpha = over.a as f32 / 255.0;
+
+    let mix = |o: u8, b: u8| (o as f32 * alpha + b as f32 * (1.0 - alpha)).round() as u8;
+
+    SynColor {
+        r: mix(over.r, base.r),
+        g: mix(over.g, base.g),
+        b: mix(over.b, base.b),
+        a: 255,
+    }
+}
+
+fn syn_to_color(c: SynColor) -> Color {
+    Color::Rgb(c.r, c.g, c.b)
 }

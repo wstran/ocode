@@ -41,6 +41,11 @@ struct Snapshot {
     cursor_line: usize,
 
     cursor_col: usize,
+
+    /// Selection anchor at the time of the edit, so undo brings the selection
+    /// back (e.g. deleting a selection then undoing re-selects it) rather than
+    /// just reverting the text.
+    anchor: Option<usize>,
 }
 
 /// A single open text file: the rope, the cursor, viewport scroll offsets, its
@@ -304,6 +309,7 @@ impl Buffer {
             rope: self.rope.clone(),
             cursor_line: self.cursor_line,
             cursor_col: self.cursor_col,
+            anchor: self.anchor,
         }
     }
 
@@ -315,6 +321,11 @@ impl Buffer {
         self.cursor_col = snap.cursor_col.min(self.line_len(self.cursor_line));
 
         self.desired_col = self.cursor_col;
+
+        // Always set the anchor from the snapshot (clamped), so it can never
+        // outlive the text it pointed into and leave a stale, misaligned
+        // selection behind.
+        self.anchor = snap.anchor.map(|a| a.min(self.rope.len_chars()));
 
         self.hl.invalidate(0);
 
@@ -1447,6 +1458,62 @@ mod tests {
         assert_eq!(b.rope.to_string(), "hello\n");
 
         assert!(!b.modified, "an unknown language leaves the buffer clean");
+    }
+
+    #[test]
+    fn undo_after_deleting_a_selection_brings_the_selection_back() {
+        let mut b = buf("hello world\n");
+
+        b.anchor = Some(0);
+
+        b.move_to_char(5); // select "hello"
+
+        assert_eq!(b.selected_text().as_deref(), Some("hello"));
+
+        b.delete_selection();
+
+        assert_eq!(b.rope.to_string(), " world\n");
+
+        assert!(b.selection().is_none());
+
+        b.undo();
+
+        assert_eq!(b.rope.to_string(), "hello world\n", "the text comes back");
+
+        assert_eq!(b.selected_text().as_deref(), Some("hello"), "and so does the selection");
+
+        b.redo();
+
+        assert_eq!(b.rope.to_string(), " world\n", "redo deletes it again");
+
+        assert!(b.selection().is_none());
+    }
+
+    /// Undo must set the anchor from the snapshot, never leave the one that was
+    /// live at undo time, which would point into different text and show a
+    /// selection that was never part of the edit.
+    #[test]
+    fn undo_does_not_leave_a_stale_selection() {
+        let mut b = buf("abcdef\n");
+
+        b.insert_char('X'); // one edit; its snapshot had no selection
+
+        // A selection made after the edit, unrelated to it.
+        b.anchor = Some(3);
+
+        b.cursor_col = 5;
+
+        b.undo();
+
+        assert_eq!(b.rope.to_string(), "abcdef\n");
+
+        assert!(
+            b.selection().is_none(),
+            "the stale anchor is cleared, not applied to the reverted text"
+        );
+
+        // The formerly out-of-range case must not panic when read.
+        let _ = b.selected_text();
     }
 
     #[test]

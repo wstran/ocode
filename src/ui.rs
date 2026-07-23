@@ -83,6 +83,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
         cols[1]
     } else {
+        app.tree_area = None;
+
         main
     };
 
@@ -245,16 +247,25 @@ fn render_tree(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
     frame.render_widget(block, area);
 
+    app.tree_area = Some((inner.x, inner.y, inner.width, inner.height));
+
     let visible = inner.height as usize;
 
     if visible == 0 {
         return;
     }
 
-    if app.tree.selected < app.tree.scroll {
-        app.tree.scroll = app.tree.selected;
-    } else if app.tree.selected >= app.tree.scroll + visible {
-        app.tree.scroll = app.tree.selected + 1 - visible;
+    // Never leave the window past the end (the list shrinks when a directory
+    // collapses or files disappear).
+    app.tree.scroll = app.tree.scroll.min(app.tree.nodes.len().saturating_sub(visible));
+
+    // While the wheel is driving the list, stop chasing the selection.
+    if !app.tree_scroll_free {
+        if app.tree.selected < app.tree.scroll {
+            app.tree.scroll = app.tree.selected;
+        } else if app.tree.selected >= app.tree.scroll + visible {
+            app.tree.scroll = app.tree.selected + 1 - visible;
+        }
     }
 
     let mut lines: Vec<Line> = Vec::with_capacity(visible);
@@ -339,14 +350,22 @@ fn centered(width: usize, text: &str, style: Style) -> Line<'static> {
 
 fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     if app.media.is_some() {
+        app.editor_area = None;
+
         render_media(frame, app, area, pal);
 
         return;
     }
 
-    let Some(buf) = app.buffer.as_mut() else {
+    if app.buffer.is_none() {
+        app.editor_area = None;
+
         render_welcome(frame, area, pal);
 
+        return;
+    }
+
+    let Some(buf) = app.buffer.as_mut() else {
         return;
     };
 
@@ -368,7 +387,15 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
     let text_width = width.saturating_sub(gutter_w);
 
-    scroll_into_view(buf, height, text_width);
+    app.editor_area = Some((area.x, area.y, area.width, area.height));
+
+    app.gutter_w = gutter_w as u16;
+
+    // While the wheel has scrolled away from the caret the view stays put; any
+    // keystroke clears the flag and the caret pulls it back.
+    if !app.scroll_free {
+        scroll_into_view(buf, height, text_width);
+    }
 
     let target = buf.scroll_row + height;
 
@@ -406,7 +433,14 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
     frame.render_widget(Paragraph::new(lines), area);
 
-    if app.focus == Focus::Editor && app.search.is_none() {
+    // A wheel scroll can leave the caret off screen; placing it then would
+    // underflow, so the terminal cursor is simply hidden until it is back.
+    let caret_visible = buf.cursor_line >= buf.scroll_row
+        && buf.cursor_line < buf.scroll_row + height
+        && buf.cursor_col >= buf.scroll_col
+        && buf.cursor_col - buf.scroll_col < text_width.max(1);
+
+    if app.focus == Focus::Editor && app.search.is_none() && caret_visible {
         let cx = area.x + gutter_w as u16 + (buf.cursor_col - buf.scroll_col) as u16;
 
         let cy = area.y + (buf.cursor_line - buf.scroll_row) as u16;
@@ -801,6 +835,27 @@ mod tests {
 
             assert_eq!(bg, Color::Reset, "status cell at x={x} paints an opaque background {bg:?}");
         }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn render_records_the_editor_area_for_mouse_mapping() {
+        let path = std::env::temp_dir().join("opencode_mouse_area.rs");
+
+        fs::write(&path, "fn main() {}\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        let _ = render_to_string(&mut app, 80, 6);
+
+        let area = app.editor_area.expect("editor area recorded for the mouse");
+
+        assert_eq!(area, (0, 0, 80, 5), "status bar takes the last row");
+
+        assert_eq!(app.gutter_w, 4, "3-digit line numbers plus a space");
 
         let _ = fs::remove_file(path);
     }

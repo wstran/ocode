@@ -9,11 +9,12 @@ mod ui;
 use std::io::{self, Stdout, Write};
 use std::panic;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::cursor::MoveTo;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
 use crossterm::{execute, queue};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -24,6 +25,13 @@ use ratatui::Terminal;
 use crate::app::App;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
+
+// Mouse reporting: 1000 (press/release) + 1002 (motion only while a button is
+// held, which is what makes drag-select work) + 1006 (SGR coordinates, so
+// columns past 223 still report). Deliberately not 1003 (any-motion): that
+// reports every pointer move and would wake the render loop while idle.
+const MOUSE_ON: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const MOUSE_OFF: &[u8] = b"\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 /// opencode — a fast terminal code reader & editor.
 #[derive(Parser)]
@@ -79,13 +87,13 @@ fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
         match app.wake_after() {
             Some(timeout) => {
                 if event::poll(timeout)? {
-                    read_key(app)?;
+                    drain_input(app)?;
                 } else {
                     app.tick();
                 }
             }
 
-            None => read_key(app)?,
+            None => drain_input(app)?,
         }
     }
 }
@@ -126,10 +134,45 @@ fn clear_image() -> Result<()> {
     Ok(())
 }
 
-fn read_key(app: &mut App) -> Result<()> {
-    if let Event::Key(key) = event::read()? {
-        if key.kind == KeyEventKind::Press {
+/// Handle one event. Returns `true` when it may have moved the panes around, so
+/// the caller redraws before mapping any further mouse position against them.
+fn read_event(app: &mut App) -> Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
             app.on_key(key);
+
+            Ok(false)
+        }
+
+        Event::Mouse(mouse) => {
+            let opens_something = matches!(mouse.kind, MouseEventKind::Down(_));
+
+            app.on_mouse(mouse);
+
+            Ok(opens_something)
+        }
+
+        _ => Ok(false),
+    }
+}
+
+/// Drain everything already queued before returning to the draw. One wheel or
+/// drag gesture arrives as a burst of events; redrawing between each is what
+/// makes scrolling feel like it is lagging behind the pointer.
+fn drain_input(app: &mut App) -> Result<()> {
+    if read_event(app)? {
+        return Ok(());
+    }
+
+    // Bounded so a device that produces events faster than we consume them can
+    // never starve the redraw.
+    for _ in 0..512 {
+        if app.should_quit || !event::poll(Duration::ZERO)? {
+            break;
+        }
+
+        if read_event(app)? {
+            break;
         }
     }
 
@@ -145,6 +188,10 @@ fn setup_terminal() -> Result<Tui> {
 
     execute!(stdout, EnterAlternateScreen).context("entering alternate screen")?;
 
+    stdout.write_all(MOUSE_ON).context("enabling mouse reporting")?;
+
+    stdout.flush().context("enabling mouse reporting")?;
+
     let backend = CrosstermBackend::new(stdout);
 
     Terminal::new(backend).context("creating terminal")
@@ -152,6 +199,11 @@ fn setup_terminal() -> Result<Tui> {
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode().context("disabling raw mode")?;
+
+    terminal
+        .backend_mut()
+        .write_all(MOUSE_OFF)
+        .context("disabling mouse reporting")?;
 
     execute!(terminal.backend_mut(), LeaveAlternateScreen).context("leaving alternate screen")?;
 
@@ -167,6 +219,10 @@ fn install_panic_hook() {
 
     panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
+
+        // Leaving mouse reporting on would spray escape codes into the user's
+        // shell on every click after the crash.
+        let _ = io::stdout().write_all(MOUSE_OFF);
 
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
 

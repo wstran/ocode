@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
@@ -18,6 +18,21 @@ pub enum Focus {
 
 pub struct Search {
     pub query: String,
+}
+
+/// Lines the editor view moves per wheel event.
+const EDITOR_SCROLL_STEP: isize = 3;
+
+/// Rows the file tree scrolls per wheel event. Deliberately one: a trackpad
+/// emits a burst of events per gesture, and a bigger step makes the list bolt.
+const TREE_SCROLL_STEP: isize = 1;
+
+fn in_area(area: Option<(u16, u16, u16, u16)>, (col, row): (u16, u16)) -> bool {
+    let Some((x, y, w, h)) = area else {
+        return false;
+    };
+
+    col >= x && col < x + w && row >= y && row < y + h
 }
 
 pub struct App {
@@ -70,6 +85,28 @@ pub struct App {
 
     /// Visible editor text rows, updated every render so paging knows the step.
     pub page_rows: usize,
+
+    /// Editor text area (x, y, w, h) and its gutter width, recorded each render
+    /// so a mouse position can be mapped back to a buffer line and column.
+    pub editor_area: Option<(u16, u16, u16, u16)>,
+
+    pub gutter_w: u16,
+
+    /// Inner area of the file tree from the last render, for routing the mouse.
+    pub tree_area: Option<(u16, u16, u16, u16)>,
+
+    /// Set while the wheel has scrolled the view away from the caret, so the
+    /// renderer stops pulling the view back until the caret moves again.
+    pub scroll_free: bool,
+
+    /// Same, for the file tree: the wheel scrolls the list without dragging the
+    /// selection along, so the renderer must not chase the selection either.
+    pub tree_scroll_free: bool,
+
+    /// Row a previous click selected. Clicking it again opens it, so a stray
+    /// click only moves the selection. Tracked separately from `tree.selected`
+    /// because row 0 starts selected and would otherwise open on first click.
+    pub tree_click: Option<usize>,
 
     /// System clipboard handle (`None` if the platform has none); copies also go
     /// to `clip_internal` so paste still works without a system clipboard.
@@ -135,12 +172,26 @@ impl App {
             pending_open: None,
             should_quit: false,
             page_rows: 1,
+            editor_area: None,
+            gutter_w: 0,
+            tree_area: None,
+            scroll_free: false,
+            tree_scroll_free: false,
+            tree_click: None,
             clipboard: arboard::Clipboard::new().ok(),
             clip_internal: String::new(),
         })
     }
 
     pub fn on_key(&mut self, key: KeyEvent) {
+        // Any keystroke hands both views back to their cursors after a scroll,
+        // and drops a half-finished click (the selection may have moved since).
+        self.scroll_free = false;
+
+        self.tree_scroll_free = false;
+
+        self.tree_click = None;
+
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         if self.picker.is_some() {
@@ -304,10 +355,138 @@ impl App {
             KeyCode::Tab => self.focus = Focus::Editor,
 
             // Enter or Space both open a file / toggle a directory.
-            KeyCode::Enter | KeyCode::Char(' ') => self.activate_tree_entry(),
+            KeyCode::Enter | KeyCode::Char(' ') => self.activate_tree_entry(false),
 
             _ => {}
         }
+    }
+
+    /// Route a mouse event to whichever pane the pointer is over. The picker is
+    /// keyboard-only, so it swallows the mouse rather than acting on stale areas.
+    pub fn on_mouse(&mut self, ev: MouseEvent) {
+        if self.picker.is_some() {
+            return;
+        }
+
+        let at = (ev.column, ev.row);
+
+        if self.tree_visible && in_area(self.tree_area, at) {
+            self.on_tree_mouse(ev);
+        } else if in_area(self.editor_area, at) {
+            self.on_editor_mouse(ev);
+        }
+    }
+
+    fn on_tree_mouse(&mut self, ev: MouseEvent) {
+        let Some((_, y, _, _)) = self.tree_area else {
+            return;
+        };
+
+        match ev.kind {
+            // The wheel scrolls the list itself and leaves the selection alone,
+            // the way any file browser behaves.
+            MouseEventKind::ScrollUp => self.scroll_tree(-TREE_SCROLL_STEP),
+
+            MouseEventKind::ScrollDown => self.scroll_tree(TREE_SCROLL_STEP),
+
+            MouseEventKind::Down(MouseButton::Left) => {
+                let idx = self.tree.scroll + (ev.row - y) as usize;
+
+                if idx < self.tree.nodes.len() {
+                    self.tree.selected = idx;
+
+                    self.focus = Focus::Tree;
+
+                    self.scroll_free = false;
+
+                    self.tree_scroll_free = false;
+
+                    // Expanding a folder is cheap and reversible, so it happens on
+                    // the first click. Opening a file is not, so it takes two.
+                    // Either way the row indices below may shift, which retires
+                    // any half-finished click aimed at the old layout.
+                    if self.tree.nodes[idx].is_dir {
+                        self.tree_click = None;
+
+                        self.activate_tree_entry(true);
+                    } else if self.tree_click == Some(idx) {
+                        self.tree_click = None;
+
+                        // Opened with the mouse: keep the sidebar up so the next
+                        // file is a click away (the keyboard still collapses it).
+                        self.activate_tree_entry(true);
+                    } else {
+                        // First click only moves the selection, so a misclick
+                        // never opens the wrong file.
+                        self.tree_click = Some(idx);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    fn scroll_tree(&mut self, delta: isize) {
+        let visible = self.tree_area.map(|(_, _, _, h)| h as usize).unwrap_or(1);
+
+        self.tree.scroll_view(delta, visible);
+
+        self.tree_scroll_free = true;
+    }
+
+    fn on_editor_mouse(&mut self, ev: MouseEvent) {
+        match ev.kind {
+            MouseEventKind::ScrollUp => self.scroll_view(-EDITOR_SCROLL_STEP),
+
+            MouseEventKind::ScrollDown => self.scroll_view(EDITOR_SCROLL_STEP),
+
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.focus = Focus::Editor;
+
+                self.place_caret(ev.column, ev.row, false);
+            }
+
+            // Dragging with the button held sweeps a selection from the press.
+            MouseEventKind::Drag(MouseButton::Left) => self.place_caret(ev.column, ev.row, true),
+
+            _ => {}
+        }
+    }
+
+    /// Map a screen cell to a buffer position and move the caret there; with
+    /// `extend` the move sweeps a selection instead of collapsing it.
+    fn place_caret(&mut self, col: u16, row: u16, extend: bool) {
+        let Some((x, y, _, _)) = self.editor_area else {
+            return;
+        };
+
+        let gutter = self.gutter_w;
+
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        let line = buf.scroll_row + (row - y) as usize;
+
+        // A click on the gutter lands on the first visible column of that line.
+        let column = buf.scroll_col + col.saturating_sub(x + gutter) as usize;
+
+        buf.sel(extend);
+
+        buf.move_to_pos(line, column);
+
+        self.scroll_free = false;
+    }
+
+    fn scroll_view(&mut self, delta: isize) {
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        buf.scroll_view(delta);
+
+        self.scroll_free = true;
     }
 
     fn on_editor_key(&mut self, key: KeyEvent) {
@@ -478,7 +657,10 @@ impl App {
         }
     }
 
-    fn activate_tree_entry(&mut self) {
+    /// Open the selected file (or expand/collapse a directory). `keep_tree`
+    /// leaves the sidebar up, which is what a mouse click wants: browsing by
+    /// clicking should not collapse the list you are clicking in.
+    fn activate_tree_entry(&mut self, keep_tree: bool) {
         let Some(node) = self.tree.selected_node() else {
             return;
         };
@@ -507,10 +689,10 @@ impl App {
             return;
         }
 
-        self.open_file(path);
+        self.open_file(path, keep_tree);
     }
 
-    fn open_file(&mut self, path: PathBuf) {
+    fn open_file(&mut self, path: PathBuf, keep_tree: bool) {
         let loaded = match media::classify(&path) {
             Ok(Loaded::Text) => {
                 let syntax = self.highlighter.syntax_name_for_path(&path);
@@ -546,8 +728,10 @@ impl App {
         self.focus = Focus::Editor;
 
         // Close the file list so the view goes full-screen; Ctrl+B brings it
-        // back to pick another file.
-        self.tree_visible = false;
+        // back to pick another file. A mouse click keeps it up instead.
+        if !keep_tree {
+            self.tree_visible = false;
+        }
 
         self.pending_open = None;
 
@@ -658,8 +842,10 @@ impl App {
 
         self.poll_disk();
 
-        if self.tree_visible {
-            self.tree.poll();
+        // A refresh reorders rows as files appear or disappear, so a click armed
+        // against the old list would now point at a different file.
+        if self.tree_visible && self.tree.poll() {
+            self.tree_click = None;
         }
     }
 
@@ -838,6 +1024,335 @@ mod tests {
         app.picker = None;
 
         app
+    }
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+    }
+
+    /// Editor pane as the renderer would record it: full width, 3-digit gutter.
+    fn with_editor_area(app: &mut App) {
+        app.editor_area = Some((0, 0, 80, 10));
+
+        app.gutter_w = 4;
+    }
+
+    #[test]
+    fn mouse_click_places_the_caret() {
+        let mut app = app_with("click", "fn main() {\n    let x = 1;\n    x\n}\n");
+
+        with_editor_area(&mut app);
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 4 + 8, 1));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert_eq!((buf.cursor_line, buf.cursor_col), (1, 8));
+    }
+
+    #[test]
+    fn mouse_click_clamps_past_the_line_end_and_in_the_gutter() {
+        let mut app = app_with("clamp", "fn main() {\n    let x = 1;\n    x\n}\n");
+
+        with_editor_area(&mut app);
+
+        // Past the end of line 2 ("    x", 5 chars) but still inside the pane.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 60, 2));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 5, "clamped to line end");
+
+        // Inside the gutter: lands on the first column, never underflows.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 1));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
+    }
+
+    #[test]
+    fn mouse_drag_selects_from_the_press() {
+        let mut app = app_with("drag", "hello world\n");
+
+        with_editor_area(&mut app);
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 4, 0));
+
+        app.on_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 4 + 5, 0));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().selected_text().as_deref(),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn wheel_scrolls_the_view_without_moving_the_caret() {
+        let text: String = (0..50).map(|i| format!("line {i}\n")).collect();
+
+        let mut app = app_with("wheel", &text);
+
+        with_editor_area(&mut app);
+
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 10, 5));
+
+        {
+            let buf = app.buffer.as_ref().unwrap();
+
+            assert_eq!(buf.scroll_row, EDITOR_SCROLL_STEP as usize);
+
+            assert_eq!(buf.cursor_line, 0, "the wheel must not drag the caret");
+        }
+
+        assert!(app.scroll_free);
+
+        app.on_key(KeyEvent::from(KeyCode::Right));
+
+        assert!(!app.scroll_free, "a keystroke hands the view back to the caret");
+    }
+
+    #[test]
+    fn wheel_up_stops_at_the_top() {
+        let mut app = app_with("wheel_top", "a\nb\nc\n");
+
+        with_editor_area(&mut app);
+
+        app.on_mouse(mouse(MouseEventKind::ScrollUp, 10, 1));
+
+        assert_eq!(app.buffer.as_ref().unwrap().scroll_row, 0);
+    }
+
+    #[test]
+    fn mouse_open_keeps_the_sidebar_but_the_keyboard_still_closes_it() {
+        let dir = std::env::temp_dir().join("opencode_keep_sidebar");
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.buffer.is_none(), "the first click only selects");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.buffer.is_some(), "the second click opened the file");
+
+        assert!(app.tree_visible, "a mouse click keeps the sidebar up");
+
+        // The keyboard path keeps the old behavior.
+        app.focus = Focus::Tree;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        assert!(!app.tree_visible, "Enter still collapses the sidebar");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// A stray click must never open a file: the first lands the selection, only
+    /// a second click on that same row opens it.
+    #[test]
+    fn first_tree_click_selects_and_only_the_second_opens() {
+        let dir = std::env::temp_dir().join("opencode_two_step_click");
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "aaa\n").unwrap();
+
+        fs::write(dir.join("b.txt"), "bbb\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        // Row 0 starts selected, so this is the case that used to open at once.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.buffer.is_none(), "first click on the pre-selected row selects only");
+
+        assert_eq!(app.tree.selected, 0);
+
+        // Clicking a different row moves the selection instead of opening.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 1));
+
+        assert!(app.buffer.is_none(), "moving to another row must not open it");
+
+        assert_eq!(app.tree.selected, 1);
+
+        // Second click on that row opens it.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 1));
+
+        assert!(app.buffer.is_some(), "second click on the same row opens");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_folder_expands_on_a_single_click() {
+        let dir = std::env::temp_dir().join("opencode_folder_click");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let _ = fs::create_dir_all(dir.join("sub"));
+
+        fs::write(dir.join("sub").join("inner.txt"), "x").unwrap();
+
+        fs::write(dir.join("a.txt"), "a").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        let row = app.tree.nodes.iter().position(|n| n.is_dir).expect("a directory row");
+
+        assert!(!app.tree.nodes[row].expanded, "starts collapsed");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, row as u16));
+
+        assert!(app.tree.nodes[row].expanded, "one click expands a folder");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, row as u16));
+
+        assert!(!app.tree.nodes[row].expanded, "clicking it again collapses");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Expanding a folder inserts rows, so a file click armed against the old
+    /// layout must not survive to open whatever now sits on that row.
+    #[test]
+    fn expanding_a_folder_drops_a_half_finished_file_click() {
+        let dir = std::env::temp_dir().join("opencode_click_shift");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let _ = fs::create_dir_all(dir.join("sub"));
+
+        fs::write(dir.join("sub").join("inner.txt"), "x").unwrap();
+
+        fs::write(dir.join("a.txt"), "a").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        let file_row = app.tree.nodes.iter().position(|n| !n.is_dir).expect("a file row");
+
+        let dir_row = app.tree.nodes.iter().position(|n| n.is_dir).expect("a directory row");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, file_row as u16));
+
+        assert_eq!(app.tree_click, Some(file_row), "file click armed");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, dir_row as u16));
+
+        assert_eq!(app.tree_click, None, "expanding retires the armed click");
+
+        assert!(app.buffer.is_none(), "and nothing was opened");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Keyboard use must re-arm the two-step, otherwise a single later click
+    /// could open a row the keyboard had moved away from.
+    #[test]
+    fn a_keystroke_cancels_a_half_finished_click() {
+        let dir = std::env::temp_dir().join("opencode_click_rearm");
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "aaa\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert_eq!(app.tree_click, Some(0), "click armed the row");
+
+        app.on_key(KeyEvent::from(KeyCode::Down));
+
+        assert_eq!(app.tree_click, None, "a keystroke disarms it");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.buffer.is_none(), "the click must select again, not open");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tree_wheel_scrolls_the_list_without_moving_the_selection() {
+        let dir = std::env::temp_dir().join("opencode_tree_wheel");
+
+        let _ = fs::create_dir_all(&dir);
+
+        for i in 0..30 {
+            fs::write(dir.join(format!("f{i:02}.txt")), "x").unwrap();
+        }
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        let selected = app.tree.selected;
+
+        app.on_mouse(mouse(MouseEventKind::ScrollDown, 2, 5));
+
+        assert_eq!(app.tree.scroll, TREE_SCROLL_STEP as usize, "one row per event");
+
+        assert_eq!(app.tree.selected, selected, "the wheel must not move the selection");
+
+        assert!(app.tree_scroll_free);
+
+        // Scrolling up stops at the top rather than underflowing.
+        for _ in 0..10 {
+            app.on_mouse(mouse(MouseEventKind::ScrollUp, 2, 5));
+        }
+
+        assert_eq!(app.tree.scroll, 0);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mouse_outside_the_panes_is_ignored() {
+        let mut app = app_with("outside", "abc\n");
+
+        app.editor_area = Some((0, 0, 10, 3));
+
+        app.gutter_w = 4;
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 50, 50));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
     }
 
     fn plain(code: KeyCode) -> KeyEvent {

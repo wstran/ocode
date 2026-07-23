@@ -713,6 +713,23 @@ impl Buffer {
         self.cursor_col = self.desired_col.min(self.line_len(self.cursor_line));
     }
 
+    /// Move the cursor to a line and column, clamping both into the buffer
+    /// (used by mouse clicks, where either can point past the text).
+    pub fn move_to_pos(&mut self, line: usize, col: usize) {
+        let line = line.min(self.last_line());
+
+        let col = col.min(self.line_len(line));
+
+        self.move_to_char(self.rope.line_to_char(line) + col);
+    }
+
+    /// Scroll the viewport by `delta` lines, leaving the caret where it is.
+    pub fn scroll_view(&mut self, delta: isize) {
+        let last = self.last_line() as isize;
+
+        self.scroll_row = (self.scroll_row as isize + delta).clamp(0, last) as usize;
+    }
+
     /// Move the cursor to an absolute char index (used by search).
     pub fn move_to_char(&mut self, idx: usize) {
         let idx = idx.min(self.rope.len_chars());

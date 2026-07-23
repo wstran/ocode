@@ -102,6 +102,14 @@ impl FileTree {
         acc
     }
 
+    /// Scroll the visible window by `delta` rows without touching the selection,
+    /// clamped so the list never scrolls past its last screenful.
+    pub fn scroll_view(&mut self, delta: isize, visible: usize) {
+        let max = self.nodes.len().saturating_sub(visible.max(1)) as isize;
+
+        self.scroll = (self.scroll as isize + delta).clamp(0, max.max(0)) as usize;
+    }
+
     pub fn move_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;

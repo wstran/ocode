@@ -275,6 +275,20 @@ impl App {
             }
         }
 
+        // Working in the code with the list still up (where a mouse click leaves
+        // things): peel the sidebar away. This is a layer of its own, so it does
+        // not arm the quit; the next Esc then offers the browser again exactly
+        // like the keyboard path does.
+        if self.tree_visible && self.focus == Focus::Editor && !self.on_welcome() {
+            self.tree_visible = false;
+
+            self.esc_confirm = false;
+
+            self.clear_flash();
+
+            return;
+        }
+
         // A second Esc in a row confirms the quit, wherever focus landed (the
         // arming Esc below may have moved it into the freshly-opened tree).
         if self.esc_confirm {
@@ -367,6 +381,15 @@ impl App {
         if self.picker.is_some() {
             return;
         }
+
+        // Mouse input disarms the same one-shot confirmations a keystroke does.
+        // Without this an Esc armed before a click stays armed, and the next Esc
+        // quits instead of re-arming.
+        self.quit_confirm = false;
+
+        self.overwrite_confirm = false;
+
+        self.esc_confirm = false;
 
         let at = (ev.column, ev.row);
 
@@ -1119,6 +1142,43 @@ mod tests {
         assert_eq!(app.buffer.as_ref().unwrap().scroll_row, 0);
     }
 
+    /// Esc arms the quit, then a click must disarm it: the reported bug was Esc
+    /// (which pops the browser) then clicking a file then Esc quitting outright.
+    #[test]
+    fn a_click_disarms_a_pending_esc_quit() {
+        let dir = std::env::temp_dir().join("opencode_esc_click");
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter)); // welcome -> browser
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        // Arm the quit with one Esc.
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(app.esc_confirm, "first Esc arms the quit");
+
+        // Click a file in the sidebar (select, then open).
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(!app.esc_confirm, "a click must disarm the pending quit");
+
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(!app.should_quit, "Esc after a click re-arms instead of quitting");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn mouse_open_keeps_the_sidebar_but_the_keyboard_still_closes_it() {
         let dir = std::env::temp_dir().join("opencode_keep_sidebar");
@@ -1193,6 +1253,96 @@ mod tests {
         app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 1));
 
         assert!(app.buffer.is_some(), "second click on the same row opens");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Esc peels the sidebar away when the user is in the code, and the ladder
+    /// then rejoins the keyboard path: the next Esc offers the browser back, and
+    /// only the one after that quits.
+    #[test]
+    fn esc_peels_the_sidebar_then_reoffers_it_before_quitting() {
+        let dir = std::env::temp_dir().join("opencode_esc_peel");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        // Open it with the mouse: sidebar stays up, focus lands in the code.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.tree_visible && app.focus == Focus::Editor);
+
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(!app.tree_visible, "Esc hides the sidebar");
+
+        assert!(!app.should_quit, "and does not quit yet");
+
+        assert!(!app.esc_confirm, "peeling must not leave the quit armed");
+
+        // Back on the keyboard ladder: this Esc offers the browser again.
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(app.tree_visible, "the next Esc brings the browser back");
+
+        assert_eq!(app.focus, Focus::Tree, "and focuses it");
+
+        assert!(!app.should_quit, "still not quitting");
+
+        // Only now does Esc quit.
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(app.should_quit, "the third Esc quits");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Keyboard-only path is untouched: with focus in the tree, Esc still just
+    /// arms the quit and leaves the sidebar alone.
+    #[test]
+    fn esc_with_focus_in_the_tree_keeps_the_old_behavior() {
+        let dir = std::env::temp_dir().join("opencode_esc_tree_focus");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "hello\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter)); // browser, focus = Tree
+
+        app.on_key(KeyEvent::from(KeyCode::Enter)); // open the file (hides tree)
+
+        assert!(!app.tree_visible, "the keyboard still collapses the sidebar");
+
+        // Esc with a file open and no sidebar: unchanged, it pops the browser.
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(app.tree_visible && app.focus == Focus::Tree, "Esc opens the browser");
+
+        assert!(app.esc_confirm);
+
+        // Focus is in the tree, so the next Esc quits exactly as before.
+        app.on_key(KeyEvent::from(KeyCode::Esc));
+
+        assert!(app.should_quit);
 
         let _ = fs::remove_dir_all(dir);
     }

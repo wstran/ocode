@@ -451,22 +451,11 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
 fn render_media(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     if matches!(app.media, Some(Media::Image(_))) {
-        // The tree would overlap a kitty image, so hide the image while it is
-        // open and tell the user how to view it.
-        if app.tree_visible {
-            app.image_cells = None;
-
-            let line = Line::from(Span::styled(
-                "  image — press Ctrl+B to hide the tree and view it",
-                Style::default().fg(pal.dim),
-            ));
-
-            frame.render_widget(Paragraph::new(line), area);
-        } else {
-            // Leave the area blank; the run loop paints the image into it.
-            app.image_cells = (area.width > 0 && area.height > 0)
-                .then_some((area.x, area.y, area.width, area.height));
-        }
+        // Leave the area blank; the run loop paints the image into it. This is
+        // the editor pane, so it already sits clear of the sidebar and the
+        // image is simply scaled into whatever width is left.
+        app.image_cells = (area.width > 0 && area.height > 0)
+            .then_some((area.x, area.y, area.width, area.height));
 
         return;
     }
@@ -858,6 +847,43 @@ mod tests {
         assert_eq!(app.gutter_w, 4, "3-digit line numbers plus a space");
 
         let _ = fs::remove_file(path);
+    }
+
+    /// An image opened with the sidebar up must still be painted, in the editor
+    /// pane beside the tree rather than suppressed.
+    #[test]
+    fn image_renders_beside_an_open_sidebar() {
+        let dir = std::env::temp_dir().join("opencode_img_sidebar");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("p.png");
+
+        let mut img = image::RgbaImage::new(20, 10);
+
+        for px in img.pixels_mut() {
+            *px = image::Rgba([10, 20, 30, 255]);
+        }
+
+        image::DynamicImage::ImageRgba8(img).save(&path).unwrap();
+
+        let mut app = App::new(path, false).unwrap();
+
+        app.picker = None;
+
+        app.tree_visible = true;
+
+        let _ = render_to_string(&mut app, 80, 10);
+
+        let cells = app.image_cells.expect("image still painted with the tree open");
+
+        assert_eq!(cells.0, 32, "placed to the right of the 32-column sidebar");
+
+        assert_eq!(cells.2, 48, "and given the remaining width");
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod app;
 mod buffer;
+mod comment;
 mod config;
 mod highlight;
 mod media;
@@ -34,8 +35,13 @@ type Painted = Option<(u64, (u16, u16, u16, u16))>;
 // held, which is what makes drag-select work) + 1006 (SGR coordinates, so
 // columns past 223 still report). Deliberately not 1003 (any-motion): that
 // reports every pointer move and would wake the render loop while idle.
-const MOUSE_ON: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h";
-const MOUSE_OFF: &[u8] = b"\x1b[?1006l\x1b[?1002l\x1b[?1000l";
+//
+// The trailing `\x1b[>1s` is XTSHIFTESCAPE: it asks the terminal to send
+// shift+click to us instead of using shift for its own selection, so Shift+click
+// can extend the editor selection. It is scoped to this program and reset on
+// exit, so the terminal's shift-selection is untouched everywhere else.
+const MOUSE_ON: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[>1s";
+const MOUSE_OFF: &[u8] = b"\x1b[>0s\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 /// opencode — a fast terminal code reader & editor.
 #[derive(Parser)]

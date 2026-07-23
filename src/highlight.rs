@@ -357,6 +357,12 @@ impl HlCache {
         }
     }
 
+    /// The syntect syntax name this buffer is highlighted as; used to pick the
+    /// comment token.
+    pub fn syntax_name(&self) -> &str {
+        &self.syntax_name
+    }
+
     /// Spans for a line, or `None` if it has not been highlighted yet (the
     /// caller is expected to call [`SyntaxHighlighter::ensure`] first).
     pub fn line(&self, idx: usize) -> Option<&[(Style, String)]> {

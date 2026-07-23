@@ -246,6 +246,12 @@ impl App {
 
                 KeyCode::Char('r') => return self.reload(),
 
+                // Toggle comment. A legacy terminal sends Ctrl+/ as byte 0x1F,
+                // which crossterm cannot tell from Ctrl+7; a terminal speaking
+                // the kitty keyboard protocol reports Ctrl+/ directly. Accept
+                // both so the key works everywhere.
+                KeyCode::Char('7') | KeyCode::Char('/') => return self.comment_toggle(),
+
                 // Other Ctrl combos (Ctrl+arrows, Ctrl+Z/Y, …) fall through to
                 // the focused pane.
                 _ => {}
@@ -473,7 +479,11 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.focus = Focus::Editor;
 
-                self.place_caret(ev.column, ev.row, false);
+                // Shift+click extends the selection from the caret (or the
+                // existing anchor) to the click; a plain click collapses it.
+                let extend = ev.modifiers.contains(KeyModifiers::SHIFT);
+
+                self.place_caret(ev.column, ev.row, extend);
             }
 
             // Dragging with the button held sweeps a selection from the press.
@@ -938,6 +948,12 @@ impl App {
         }
     }
 
+    fn comment_toggle(&mut self) {
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.toggle_comment();
+        }
+    }
+
     fn set_clipboard(&mut self, text: String) {
         if let Some(cb) = self.clipboard.as_mut() {
             let _ = cb.set_text(text.clone());
@@ -1075,6 +1091,15 @@ mod tests {
         MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
     }
 
+    fn shift_click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::SHIFT,
+        }
+    }
+
     /// Editor pane as the renderer would record it: full width, 3-digit gutter.
     fn with_editor_area(app: &mut App) {
         app.editor_area = Some((0, 0, 80, 10));
@@ -1110,6 +1135,49 @@ mod tests {
         app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 1, 1));
 
         assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 0);
+    }
+
+    #[test]
+    fn shift_click_extends_selection_from_the_caret() {
+        let mut app = app_with("shiftclick", "hello world\nsecond line\n");
+
+        with_editor_area(&mut app);
+
+        // Plain click to drop the caret at line 0, column 2 (gutter is 4).
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 4 + 2, 0));
+
+        assert!(app.buffer.as_ref().unwrap().selection().is_none(), "a plain click has no selection");
+
+        // Shift+click on line 1, column 5, selects from the caret to there.
+        app.on_mouse(shift_click(4 + 5, 1));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().selected_text().as_deref(),
+            Some("llo world\nsecon")
+        );
+    }
+
+    /// Repeated Shift+clicks pivot around the original anchor, not the previous
+    /// click, the way a modern editor extends a selection.
+    #[test]
+    fn repeated_shift_click_keeps_the_original_anchor() {
+        let mut app = app_with("shiftanchor", "hello world\nsecond line\n");
+
+        with_editor_area(&mut app);
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 4 + 2, 0)); // caret at (0,2)
+
+        app.on_mouse(shift_click(4 + 8, 0)); // extend to (0,8)
+
+        assert_eq!(app.buffer.as_ref().unwrap().selected_text().as_deref(), Some("llo wo"));
+
+        app.on_mouse(shift_click(4 + 3, 1)); // extend again, still from (0,2)
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().selected_text().as_deref(),
+            Some("llo world\nsec"),
+            "the anchor stayed at the first caret, it did not jump to the last click"
+        );
     }
 
     #[test]
@@ -1491,6 +1559,37 @@ mod tests {
         assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "one\ntwo\n");
 
         assert!(!app.buffer.as_ref().unwrap().modified, "no edit, so nothing to save");
+    }
+
+    /// Ctrl+/ arrives as Ctrl+7 on a legacy terminal and as Ctrl+/ under the
+    /// kitty protocol; both must toggle the comment.
+    #[test]
+    fn ctrl_slash_toggles_line_comment() {
+        let path = std::env::temp_dir().join("opencode_toggle_comment.rs");
+
+        fs::write(&path, "let x = 1;\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "// let x = 1;\n",
+            "Ctrl+7 (legacy Ctrl+/) comments"
+        );
+
+        app.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "let x = 1;\n",
+            "Ctrl+/ (kitty protocol) uncomments"
+        );
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

@@ -678,6 +678,170 @@ impl Buffer {
         self.mark_edit(None);
     }
 
+    /// Toggle comments on the caret line, or every line the selection covers.
+    /// Line-comment languages toggle per line at the block's minimum indent;
+    /// block-only languages (CSS, HTML) wrap the covered lines instead. A
+    /// language with no known token does nothing.
+    pub fn toggle_comment(&mut self) {
+        let style = crate::comment::for_syntax(self.hl.syntax_name());
+
+        let had_selection = self.selection().is_some();
+
+        let (first, last) = self.selected_line_span().unwrap_or((self.cursor_line, self.cursor_line));
+
+        let changed = if let Some(token) = style.line {
+            self.toggle_line_comment(first, last, token)
+        } else if let Some((open, close)) = style.block {
+            self.toggle_block_comment(first, last, open, close)
+        } else {
+            false
+        };
+
+        if !changed {
+            return;
+        }
+
+        // Toggling never adds or removes lines, so `first..=last` are still
+        // valid. Reselect the whole run when there was a selection so the key
+        // repeats; otherwise keep the caret on its line.
+        if had_selection {
+            self.anchor = Some(self.rope.line_to_char(first));
+
+            let end = self.rope.line_to_char(last) + self.line_len(last);
+
+            self.move_to_char(end);
+
+            self.anchor = Some(self.rope.line_to_char(first));
+        } else {
+            let col = self.cursor_col.min(self.line_len(self.cursor_line));
+
+            self.cursor_col = col;
+
+            self.desired_col = col;
+        }
+
+        self.hl.invalidate(first);
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+    }
+
+    /// True when the line, ignoring leading whitespace, already begins with the
+    /// comment token. Blank lines are treated as already commented so a block
+    /// with blank lines still uncomments in one press.
+    fn line_is_commented(&self, line: usize, token: &str) -> bool {
+        let text: String = self.rope.line(line).chars().take_while(|c| *c != '\n').collect();
+
+        let trimmed = text.trim_start();
+
+        trimmed.is_empty() || trimmed.starts_with(token)
+    }
+
+    fn toggle_line_comment(&mut self, first: usize, last: usize, token: &str) -> bool {
+        let non_blank: Vec<usize> = (first..=last)
+            .filter(|&l| self.leading_whitespace_cols(l) < self.line_len(l))
+            .collect();
+
+        if non_blank.is_empty() {
+            return false;
+        }
+
+        // Uncomment only when every non-blank line is already commented,
+        // matching the usual editor toggle.
+        let commenting = !non_blank.iter().all(|&l| self.line_is_commented(l, token));
+
+        self.record(EditKind::Other, self.rope.line_to_char(first), true);
+
+        if commenting {
+            // Insert at the shallowest indent so relative indentation is kept.
+            let col = non_blank
+                .iter()
+                .map(|&l| self.leading_whitespace_cols(l))
+                .min()
+                .unwrap_or(0);
+
+            let insert = format!("{token} ");
+
+            for &l in non_blank.iter().rev() {
+                let at = self.rope.line_to_char(l) + col;
+
+                self.rope.insert(at, &insert);
+            }
+        } else {
+            for &l in non_blank.iter().rev() {
+                self.remove_line_token(l, token);
+            }
+        }
+
+        true
+    }
+
+    /// Leading-whitespace width of a line in chars.
+    fn leading_whitespace_cols(&self, line: usize) -> usize {
+        self.rope
+            .line(line)
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .count()
+    }
+
+    /// Strip the comment token (and one following space, if the toggle added
+    /// one) from a commented line.
+    fn remove_line_token(&mut self, line: usize, token: &str) {
+        let start = self.rope.line_to_char(line);
+
+        let indent = self.leading_whitespace_cols(line);
+
+        let after = start + indent;
+
+        let tail: String = self.rope.line(line).chars().skip(indent).collect();
+
+        if !tail.starts_with(token) {
+            return;
+        }
+
+        let mut remove = token.chars().count();
+
+        if tail[token.len()..].starts_with(' ') {
+            remove += 1;
+        }
+
+        self.rope.remove(after..after + remove);
+    }
+
+    fn toggle_block_comment(&mut self, first: usize, last: usize, open: &str, close: &str) -> bool {
+        let start = self.rope.line_to_char(first) + self.leading_whitespace_cols(first);
+
+        let end = self.rope.line_to_char(last) + self.line_len(last);
+
+        if start >= end {
+            return false;
+        }
+
+        let inner: String = self.rope.slice(start..end).to_string();
+
+        let trimmed = inner.trim();
+
+        self.record(EditKind::Other, start, true);
+
+        if trimmed.starts_with(open) && trimmed.ends_with(close) && trimmed.len() >= open.len() + close.len() {
+            // Unwrap: rebuild the span without the delimiters and the padding
+            // the wrap added.
+            let body = trimmed[open.len()..trimmed.len() - close.len()].trim().to_string();
+
+            self.rope.remove(start..end);
+
+            self.rope.insert(start, &body);
+        } else {
+            self.rope.insert(end, &format!(" {close}"));
+
+            self.rope.insert(start, &format!("{open} "));
+        }
+
+        true
+    }
+
     pub fn indent_line(&mut self) {
         let start = self.rope.line_to_char(self.cursor_line);
 
@@ -1166,6 +1330,123 @@ mod tests {
             disk_mtime: None,
             disk_changed: false,
         }
+    }
+
+    fn buf_lang(text: &str, syntax: &str) -> Buffer {
+        let mut b = buf(text);
+
+        b.hl = HlCache::new(syntax.to_string());
+
+        b
+    }
+
+    fn select_lines(b: &mut Buffer, first: usize, last: usize) {
+        b.anchor = Some(b.rope.line_to_char(first));
+
+        let end = b.rope.line_to_char(last) + b.line_len(last);
+
+        b.move_to_char(end);
+    }
+
+    #[test]
+    fn comment_toggles_a_selection_and_undoes_as_one() {
+        let src = "fn f() {\n    let x = 1;\n    let y = 2;\n}\n";
+
+        let mut b = buf_lang(src, "Rust");
+
+        select_lines(&mut b, 1, 2);
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "fn f() {\n    // let x = 1;\n    // let y = 2;\n}\n");
+
+        assert!(b.selection().is_some(), "selection survives so the key repeats");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), src, "second press uncomments");
+
+        b.undo();
+
+        assert_eq!(
+            b.rope.to_string(),
+            "fn f() {\n    // let x = 1;\n    // let y = 2;\n}\n",
+            "each toggle is a single undo step"
+        );
+    }
+
+    #[test]
+    fn comment_inserts_at_the_shallowest_indent() {
+        let mut b = buf_lang("    deep\n  shallow\n", "Rust");
+
+        select_lines(&mut b, 0, 1);
+
+        b.toggle_comment();
+
+        // Token goes in at column 2 (the shallower line), so the deeper line
+        // keeps its extra indent relative to it.
+        assert_eq!(b.rope.to_string(), "  //   deep\n  // shallow\n");
+    }
+
+    #[test]
+    fn comment_skips_blank_lines() {
+        let mut b = buf_lang("a\n\nb\n", "Rust");
+
+        select_lines(&mut b, 0, 2);
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "// a\n\n// b\n", "the blank line is left alone");
+    }
+
+    #[test]
+    fn comment_on_a_mix_comments_all() {
+        let mut b = buf_lang("// a\nb\n", "Rust");
+
+        select_lines(&mut b, 0, 1);
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "// // a\n// b\n", "a mixed block comments every line");
+    }
+
+    #[test]
+    fn comment_single_line_without_selection() {
+        let mut b = buf_lang("x = 1\n", "Python");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "# x = 1\n");
+
+        assert!(b.selection().is_none(), "no selection is created");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "x = 1\n");
+    }
+
+    #[test]
+    fn block_comment_wraps_and_unwraps() {
+        let mut b = buf_lang("a { color: red }\n", "CSS");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "/* a { color: red } */\n");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "a { color: red }\n");
+    }
+
+    #[test]
+    fn comment_does_nothing_for_a_language_with_no_token() {
+        let mut b = buf_lang("hello\n", "Plain Text");
+
+        b.toggle_comment();
+
+        assert_eq!(b.rope.to_string(), "hello\n");
+
+        assert!(!b.modified, "an unknown language leaves the buffer clean");
     }
 
     #[test]

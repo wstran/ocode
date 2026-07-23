@@ -46,6 +46,11 @@ pub struct App {
     /// image; set by the renderer each frame, `None` when no image is shown.
     pub image_cells: Option<(u16, u16, u16, u16)>,
 
+    /// Bumped every time `media` is replaced, so the run loop can tell one open
+    /// image from the next even when both land on the same cell box. Must be
+    /// bumped alongside any assignment to `media`.
+    media_epoch: u64,
+
     pub tree: FileTree,
 
     pub highlighter: SyntaxHighlighter,
@@ -157,6 +162,7 @@ impl App {
             buffer,
             media,
             image_cells: None,
+            media_epoch: 0,
             tree: FileTree::new(tree_root),
             highlighter,
             focus,
@@ -601,6 +607,11 @@ impl App {
 
             KeyCode::Delete => buf.delete(),
 
+            // Ctrl+K rather than a Delete variant: Delete is one keystroke on a
+            // PC keyboard, too easy to hit for something this destructive, and
+            // overloading it would leave no plain forward delete.
+            KeyCode::Char('k') | KeyCode::Char('K') if ctrl => buf.delete_line(),
+
             // Undo / redo (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z). macOS terminals do not
             // forward Cmd, so Ctrl is used on both platforms.
             KeyCode::Char('z') | KeyCode::Char('Z') if ctrl && shift => buf.redo(),
@@ -640,15 +651,12 @@ impl App {
             KeyCode::Char('d') if alt => buf.delete_word_right(),
 
             // Shift+Tab outdents the current line (Tab below indents).
-            KeyCode::BackTab => buf.outdent_line(),
+            KeyCode::BackTab => buf.outdent(),
 
-            KeyCode::Tab => {
-                if self.tree_visible {
-                    self.focus = Focus::Tree;
-                } else {
-                    buf.indent_line();
-                }
-            }
+            // Always indents, sidebar open or not, to match Shift+Tab and the
+            // documented behaviour. Ctrl+B is the way to reach the sidebar; Tab
+            // going there would swallow indentation for as long as it is up.
+            KeyCode::Tab => buf.indent(),
 
             KeyCode::Char(c) if !ctrl && !alt => buf.insert_char(c),
 
@@ -748,6 +756,8 @@ impl App {
 
         self.media = media;
 
+        self.media_epoch = self.media_epoch.wrapping_add(1);
+
         self.focus = Focus::Editor;
 
         // Close the file list so the view goes full-screen; Ctrl+B brings it
@@ -763,12 +773,24 @@ impl App {
 
     /// Where the run loop should paint the open image (only when one is shown);
     /// `None` for text, binaries, or while the tree covers the view.
-    pub fn image_placement(&self) -> Option<(u16, u16, u16, u16)> {
-        match self.media {
-            Some(Media::Image(_)) => self.image_cells,
+    pub fn image_placement(&self) -> Option<(u64, (u16, u16, u16, u16))> {
+        let Some(Media::Image(doc)) = &self.media else {
+            return None;
+        };
 
-            _ => None,
-        }
+        let (x, y, w, h) = self.image_cells?;
+
+        let (cols, rows) = doc.fitted_cells(w, h);
+
+        // Centre it in the pane rather than pinning it to the top-left corner.
+        let cx = x + w.saturating_sub(cols) / 2;
+
+        let cy = y + h.saturating_sub(rows) / 2;
+
+        // The epoch rides along so the run loop notices a switch between images
+        // that land on the same cell box, including re-opening the same path
+        // after the file changed on disk.
+        Some((self.media_epoch, (cx, cy, cols, rows)))
     }
 
     /// kitty escape to paint the open image into a `cols`×`rows` cell box.
@@ -1345,6 +1367,185 @@ mod tests {
         assert!(app.should_quit);
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Tab used to jump to the sidebar whenever it was open, so a mouse-opened
+    /// file (which keeps the sidebar up) could not be indented at all, while
+    /// Shift+Tab still outdented.
+    #[test]
+    fn tab_indents_even_with_the_sidebar_open() {
+        let dir = std::env::temp_dir().join("opencode_tab_sidebar");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let _ = fs::create_dir_all(&dir);
+
+        fs::write(dir.join("a.txt"), "code\n").unwrap();
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(KeyEvent::from(KeyCode::Enter));
+
+        app.tree_area = Some((0, 0, 32, 10));
+
+        // Two clicks to open: the sidebar stays up, focus lands in the code.
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 2, 0));
+
+        assert!(app.tree_visible && app.focus == Focus::Editor);
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "    code\n",
+            "Tab indents instead of jumping to the sidebar"
+        );
+
+        assert_eq!(app.focus, Focus::Editor, "focus stays in the code");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Tab / Shift+Tab over a selection must move every line it covers, keep
+    /// the selection on the same text so it can be repeated, and undo as one.
+    #[test]
+    fn tab_indents_every_selected_line() {
+        let mut app = app_with("multiindent", "one\ntwo\nthree\n");
+
+        // Select from the start of line 0 down into line 2.
+        app.on_key(shift(KeyCode::Down));
+
+        app.on_key(shift(KeyCode::Down));
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "    one\n    two\n    three\n",
+            "every covered line moved"
+        );
+
+        assert!(
+            app.buffer.as_ref().unwrap().selection().is_some(),
+            "selection survives so Tab can be pressed again"
+        );
+
+        // Repeatable.
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "        one\n        two\n        three\n"
+        );
+
+        // Shift+Tab walks it back.
+        app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "    one\n    two\n    three\n"
+        );
+
+        // Each press is a single undo step.
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "        one\n        two\n        three\n"
+        );
+    }
+
+    /// A selection ending at column 0 must not drag the next line in.
+    #[test]
+    fn selection_ending_at_a_line_start_does_not_indent_that_line() {
+        let mut app = app_with("indentedge", "one\ntwo\nthree\n");
+
+        // Select exactly line 0, ending at the start of line 1.
+        app.on_key(shift(KeyCode::Down));
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(
+            app.buffer.as_ref().unwrap().rope.to_string(),
+            "    one\ntwo\nthree\n",
+            "only the line actually covered moved"
+        );
+    }
+
+    #[test]
+    fn outdent_on_unindented_selection_does_nothing() {
+        let mut app = app_with("outdentnoop", "one\ntwo\n");
+
+        app.on_key(shift(KeyCode::Down));
+
+        app.on_key(shift(KeyCode::Right));
+
+        app.on_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "one\ntwo\n");
+
+        assert!(!app.buffer.as_ref().unwrap().modified, "no edit, so nothing to save");
+    }
+
+    #[test]
+    fn ctrl_k_deletes_the_whole_line() {
+        let mut app = app_with("killline", "one\ntwo\nthree\n");
+
+        // Caret on line 1 ("two"), somewhere in the middle.
+        app.on_key(KeyEvent::from(KeyCode::Down));
+
+        app.on_key(KeyEvent::from(KeyCode::Right));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        {
+            let buf = app.buffer.as_ref().unwrap();
+
+            assert_eq!(buf.rope.to_string(), "one\nthree\n", "the line is gone entirely");
+
+            assert_eq!(
+                (buf.cursor_line, buf.cursor_col),
+                (1, 0),
+                "caret lands on the line that moved up"
+            );
+        }
+
+        // Undone as a single step.
+        app.on_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "one\ntwo\nthree\n");
+    }
+
+    /// The last line has no trailing break, so the one before it has to go or a
+    /// blank line would be left behind.
+    #[test]
+    fn ctrl_k_on_the_last_line_leaves_no_blank() {
+        let mut app = app_with("killlast", "one\ntwo");
+
+        app.on_key(KeyEvent::from(KeyCode::Down));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert_eq!(buf.rope.to_string(), "one");
+
+        assert_eq!(buf.last_line(), 0, "no empty line left over");
+    }
+
+    #[test]
+    fn ctrl_k_on_the_only_line_empties_it() {
+        let mut app = app_with("killonly", "solo");
+
+        app.on_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "");
     }
 
     #[test]

@@ -26,6 +26,10 @@ use crate::app::App;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
+/// Which image is on screen and the cell box it occupies, as the run loop
+/// tracks it between frames.
+type Painted = Option<(u64, (u16, u16, u16, u16))>;
+
 // Mouse reporting: 1000 (press/release) + 1002 (motion only while a button is
 // held, which is what makes drag-select work) + 1006 (SGR coordinates, so
 // columns past 223 still report). Deliberately not 1003 (any-motion): that
@@ -67,7 +71,7 @@ fn main() -> Result<()> {
 fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
     // The cell box of the kitty image currently painted on screen (images are a
     // separate layer from ratatui's cell buffer, so the loop manages them).
-    let mut shown: Option<(u16, u16, u16, u16)> = None;
+    let mut shown: Painted = None;
 
     loop {
         terminal.draw(|frame| ui::render(frame, app))?;
@@ -100,7 +104,10 @@ fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
 
 /// Paint or remove the kitty image to match what the renderer asked for. Only
 /// acts on a change, so a static image is transmitted once and left alone.
-fn sync_image(app: &App, shown: &mut Option<(u16, u16, u16, u16)>) -> Result<()> {
+fn sync_image(app: &App, shown: &mut Painted) -> Result<()> {
+    // Keyed by image as well as by box: two images opened one after the other
+    // land on the same box, and comparing the box alone would skip the repaint
+    // and leave the first one on screen.
     let want = app.image_placement();
 
     if want == *shown {
@@ -111,7 +118,7 @@ fn sync_image(app: &App, shown: &mut Option<(u16, u16, u16, u16)>) -> Result<()>
 
     out.write_all(media::kitty_delete())?;
 
-    if let Some((x, y, cols, rows)) = want {
+    if let Some((_, (x, y, cols, rows))) = want {
         queue!(out, MoveTo(x, y))?;
 
         out.write_all(&app.kitty_image_sequence(cols, rows))?;

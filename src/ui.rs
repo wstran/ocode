@@ -886,6 +886,117 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    fn write_png(path: &std::path::Path, w: u32, h: u32) {
+        let mut img = image::RgbaImage::new(w, h);
+
+        for px in img.pixels_mut() {
+            *px = image::Rgba([10, 20, 30, 255]);
+        }
+
+        image::DynamicImage::ImageRgba8(img).save(path).unwrap();
+    }
+
+    fn left_click(column: u16, row: u16) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
+    /// Two images opened one after the other land on the same pane box, so the
+    /// placement has to differ by image or the run loop skips the repaint and
+    /// leaves the first one on screen.
+    #[test]
+    fn switching_images_changes_the_placement() {
+        let dir = std::env::temp_dir().join("opencode_img_switch");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        // Same size on purpose: identical cell box, so only the image differs.
+        write_png(&dir.join("a.png"), 20, 10);
+
+        write_png(&dir.join("b.png"), 20, 10);
+
+        let mut app = App::new(dir.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter));
+
+        // Render once so the sidebar geometry clicks map against is real.
+        let _ = render_to_string(&mut app, 80, 12);
+
+        let (_, ty, _, _) = app.tree_area.expect("sidebar recorded");
+
+        let row_of = |app: &App, name: &str| {
+            let idx = app.tree.nodes.iter().position(|n| n.name == name).expect("row");
+
+            ty + (idx - app.tree.scroll) as u16
+        };
+
+        // Two clicks to open: the first only selects.
+        let ra = row_of(&app, "a.png");
+
+        app.on_mouse(left_click(2, ra));
+
+        app.on_mouse(left_click(2, ra));
+
+        let _ = render_to_string(&mut app, 80, 12);
+
+        let first = app.image_placement().expect("a.png placed");
+
+        let rb = row_of(&app, "b.png");
+
+        app.on_mouse(left_click(2, rb));
+
+        app.on_mouse(left_click(2, rb));
+
+        let _ = render_to_string(&mut app, 80, 12);
+
+        let second = app.image_placement().expect("b.png placed");
+
+        assert_eq!(first.1, second.1, "same geometry: the box alone cannot tell them apart");
+
+        assert_ne!(first, second, "so the placement must differ by image");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_is_centered_in_the_pane() {
+        let dir = std::env::temp_dir().join("opencode_img_center");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("wide.png");
+
+        // 2:1 pixels means 4 cells wide per cell tall, so an 11-row pane fits
+        // 44 columns of image inside 80, leaving 36 columns to split evenly.
+        write_png(&path, 20, 10);
+
+        let mut app = App::new(path, false).unwrap();
+
+        app.picker = None;
+
+        let _ = render_to_string(&mut app, 80, 12);
+
+        let (_, (x, y, cols, rows)) = app.image_placement().expect("image placed");
+
+        assert_eq!((cols, rows), (44, 11), "fitted to the pane, aspect preserved");
+
+        assert_eq!(x, (80 - 44) / 2, "centered horizontally");
+
+        assert_eq!(y, 0, "full height, so nothing to centre vertically");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn tree_renders_directory() {
         let dir = std::env::temp_dir().join("opencode_tree_test");

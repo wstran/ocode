@@ -202,6 +202,47 @@ impl Buffer {
         true
     }
 
+    /// Remove the whole line the caret sits on, closing the gap so the line
+    /// below moves up. On the last line the preceding break is taken instead,
+    /// otherwise deleting would leave a blank line behind.
+    pub fn delete_line(&mut self) {
+        let line = self.cursor_line;
+
+        let (start, end) = if line < self.last_line() {
+            (self.rope.line_to_char(line), self.rope.line_to_char(line + 1))
+        } else {
+            let mut start = self.rope.line_to_char(line);
+
+            if start > 0 && self.rope.char(start - 1) == '\n' {
+                start -= 1;
+
+                if start > 0 && self.rope.char(start - 1) == '\r' {
+                    start -= 1;
+                }
+            }
+
+            (start, self.rope.len_chars())
+        };
+
+        if start == end {
+            return;
+        }
+
+        self.record(EditKind::Other, start, true);
+
+        self.rope.remove(start..end);
+
+        self.anchor = None;
+
+        self.move_to_char(start.min(self.rope.len_chars()));
+
+        self.hl.invalidate(line.min(self.last_line()));
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+    }
+
     /// The selected column range within `line` (char columns), for rendering;
     /// `None` if the line has no selected cells.
     pub fn selection_for_line(&self, line: usize) -> Option<(usize, usize)> {
@@ -503,6 +544,140 @@ impl Buffer {
     }
 
     /// Indent the whole current line by one level, regardless of cursor column.
+    /// Lines the selection touches, or `None` when nothing is selected. A
+    /// selection ending exactly at a line start does not pull that line in,
+    /// otherwise selecting whole lines would indent one line too many.
+    fn selected_line_span(&self) -> Option<(usize, usize)> {
+        let (start, end) = self.selection()?;
+
+        let first = self.rope.char_to_line(start);
+
+        let mut last = self.rope.char_to_line(end);
+
+        if last > first && end == self.rope.line_to_char(last) {
+            last -= 1;
+        }
+
+        Some((first, last))
+    }
+
+    /// Width of one indent level at the head of `line`: a tab, or up to four
+    /// spaces.
+    fn leading_indent_width(&self, line: usize) -> usize {
+        let start = self.rope.line_to_char(line);
+
+        let len = self.line_len(line);
+
+        if len == 0 {
+            return 0;
+        }
+
+        if self.rope.char(start) == '\t' {
+            return 1;
+        }
+
+        let mut n = 0;
+
+        while n < INDENT.len() && n < len && self.rope.char(start + n) == ' ' {
+            n += 1;
+        }
+
+        n
+    }
+
+    /// Indent every line the selection covers, or the caret line when nothing
+    /// is selected.
+    pub fn indent(&mut self) {
+        match self.selected_line_span() {
+            Some((first, last)) => self.shift_lines(first, last, true),
+
+            None => self.indent_line(),
+        }
+    }
+
+    /// Outdent every line the selection covers, or the caret line when nothing
+    /// is selected.
+    pub fn outdent(&mut self) {
+        match self.selected_line_span() {
+            Some((first, last)) => self.shift_lines(first, last, false),
+
+            None => self.outdent_line(),
+        }
+    }
+
+    /// Shift a run of lines by one indent level as a single undo step, keeping
+    /// the selection over the same text so the key can be pressed repeatedly.
+    fn shift_lines(&mut self, first: usize, last: usize, indent: bool) {
+        // Measure first: outdenting lines that have no indent left must not
+        // push a no-op onto the undo stack.
+        let widths: Vec<usize> = if indent {
+            vec![INDENT.chars().count(); last - first + 1]
+        } else {
+            (first..=last).map(|l| self.leading_indent_width(l)).collect()
+        };
+
+        if widths.iter().all(|w| *w == 0) {
+            return;
+        }
+
+        let anchor_pos = self.anchor.map(|a| {
+            let line = self.rope.char_to_line(a);
+
+            (line, a - self.rope.line_to_char(line))
+        });
+
+        let cursor_pos = (self.cursor_line, self.cursor_col);
+
+        self.record(EditKind::Other, self.rope.line_to_char(first), true);
+
+        for (offset, width) in widths.iter().enumerate() {
+            if *width == 0 {
+                continue;
+            }
+
+            let start = self.rope.line_to_char(first + offset);
+
+            if indent {
+                self.rope.insert(start, INDENT);
+            } else {
+                self.rope.remove(start..start + width);
+            }
+        }
+
+        // Columns on the touched lines moved by exactly what was added or cut.
+        let moved = |(line, col): (usize, usize)| -> (usize, usize) {
+            if line < first || line > last {
+                return (line, col);
+            }
+
+            let width = widths[line - first] as isize;
+
+            let delta = if indent { width } else { -width };
+
+            (line, (col as isize + delta).max(0) as usize)
+        };
+
+        if let Some(pos) = anchor_pos {
+            let (line, col) = moved(pos);
+
+            self.anchor = Some(self.rope.line_to_char(line) + col.min(self.line_len(line)));
+        }
+
+        let (line, col) = moved(cursor_pos);
+
+        self.cursor_line = line;
+
+        self.cursor_col = col.min(self.line_len(line));
+
+        self.desired_col = self.cursor_col;
+
+        self.hl.invalidate(first);
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+    }
+
     pub fn indent_line(&mut self) {
         let start = self.rope.line_to_char(self.cursor_line);
 
@@ -532,17 +707,7 @@ impl Buffer {
             return;
         }
 
-        let remove = if self.rope.char(start) == '\t' {
-            1
-        } else {
-            let mut n = 0;
-
-            while n < INDENT.len() && n < len && self.rope.char(start + n) == ' ' {
-                n += 1;
-            }
-
-            n
-        };
+        let remove = self.leading_indent_width(self.cursor_line);
 
         if remove > 0 {
             self.record(EditKind::Other, start, true);

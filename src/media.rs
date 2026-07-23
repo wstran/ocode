@@ -199,6 +199,12 @@ fn describe_binary(path: &Path, head: &[u8]) -> String {
 }
 
 impl ImageDoc {
+    /// The cell box the image actually occupies inside a `cols`×`rows` area,
+    /// aspect preserved, so the caller can centre it in the leftover space.
+    pub fn fitted_cells(&self, cols: u16, rows: u16) -> (u16, u16) {
+        fit_cells(self.width, self.height, cols, rows)
+    }
+
     /// kitty escape(s) to transmit + display the image, scaled to fit a
     /// `cols`×`rows` cell box at the current cursor position (aspect preserved,
     /// cursor left in place so it never scrolls the view).
@@ -351,6 +357,17 @@ mod tests {
         }
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fit_cells_is_idempotent() {
+        // The placement fits once to centre the image, and kitty_sequence fits
+        // again on the way out; the second pass must not shrink it further.
+        for (w, h) in [(1000u32, 100u32), (100, 1000), (640, 480), (1, 1), (20, 10)] {
+            let (c, r) = fit_cells(w, h, 80, 24);
+
+            assert_eq!(fit_cells(w, h, c, r), (c, r), "for {w}x{h}");
+        }
     }
 
     #[test]

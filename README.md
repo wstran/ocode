@@ -84,7 +84,8 @@ ocode --style       # change the color scheme
 | `Backspace` / `Delete` | Delete left / right, or the selection |
 | `⌥ Delete` · `Ctrl Backspace` | Delete the word behind |
 | `⌥ Fn Delete` · `Ctrl Delete` | Delete the word ahead |
-| `Tab` / `Shift+Tab` | Indent / outdent the line |
+| `Ctrl+K` | Delete the whole line |
+| `Tab` / `Shift+Tab` | Indent / outdent the line, or every line the selection covers |
 
 **File tree** — open it with `Enter` (from the welcome screen) or `Ctrl+B`:
 `↑/↓` move · `→/←` expand/collapse · `Enter`/`Space` open · `Tab` to editor. It

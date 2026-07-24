@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal dotenv grammar: comments, keys, values.
+# Authored for ocode (MIT). Minimal dotenv grammar: comments, keys, values.
 name: DotENV
 file_extensions:
   - env

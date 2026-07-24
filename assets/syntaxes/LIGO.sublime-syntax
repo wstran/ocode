@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal LIGO (Tezos) highlighting.
+# Authored for ocode (MIT). Minimal LIGO (Tezos) highlighting.
 # Covers .ligo (PascaLIGO), .mligo (CameLIGO), .jsligo (JsLIGO).
 name: LIGO
 file_extensions:

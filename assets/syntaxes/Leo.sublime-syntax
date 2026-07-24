@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Leo (Aleo ZK) highlighting — Rust-like.
+# Authored for ocode (MIT). Minimal Leo (Aleo ZK) highlighting — Rust-like.
 name: Leo
 file_extensions:
   - leo

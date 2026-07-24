@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Verilog / SystemVerilog highlighting.
+# Authored for ocode (MIT). Minimal Verilog / SystemVerilog highlighting.
 name: Verilog
 file_extensions:
   - v

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Swift highlighting.
+# Authored for ocode (MIT). Minimal Swift highlighting.
 name: Swift
 file_extensions:
   - swift

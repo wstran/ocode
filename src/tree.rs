@@ -54,7 +54,7 @@ impl FileTree {
     }
 
     /// Re-read the tree from disk, preserving which folders are expanded and the
-    /// selected path. Picks up files created or removed while opencode is open.
+    /// selected path. Picks up files created or removed while ocode is open.
     pub fn refresh(&mut self) {
         let expanded: HashSet<PathBuf> = self
             .nodes
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn refresh_picks_up_new_and_removed_files() {
-        let dir = std::env::temp_dir().join(format!("opencode_tree_refresh_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ocode_tree_refresh_{}", std::process::id()));
 
         let _ = fs::remove_dir_all(&dir);
 

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Zig highlighting.
+# Authored for ocode (MIT). Minimal Zig highlighting.
 # Note: Zig has no /* */ block comments; only //, /// (doc) and //! (top doc).
 name: Zig
 file_extensions:

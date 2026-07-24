@@ -1,14 +1,14 @@
-<h1 align="center">opencode</h1>
+<h1 align="center">ocode</h1>
 
 <p align="center">
   <b><code>ocode</code></b> — read and edit code in your terminal, fast.
 </p>
 
 <p align="center">
-  <img src="docs/welcome.png" alt="opencode" width="720">
+  <img src="docs/welcome.png" alt="ocode" width="720">
 </p>
 
-Open a file or a folder and opencode renders it instantly: syntax-highlighted
+Open a file or a folder and ocode renders it instantly: syntax-highlighted
 code, a file tree, selection and a real clipboard. The whole screen is your
 code — the only chrome is one status line at the bottom.
 
@@ -24,8 +24,8 @@ code — the only chrome is one status line at the bottom.
 ## Install
 
 ```sh
-git clone https://github.com/wstran/opencode
-cd opencode
+git clone https://github.com/wstran/ocode
+cd ocode
 cargo install --path .        # builds and installs `ocode`
 ```
 
@@ -41,7 +41,7 @@ ocode --style       # change the color scheme
 ```
 
 <p align="center">
-  <img src="docs/editor.png" alt="opencode editing a Rust file" width="820">
+  <img src="docs/editor.png" alt="ocode editing a Rust file" width="820">
 </p>
 
 ## Keyboard
@@ -90,7 +90,7 @@ ocode --style       # change the color scheme
 
 **File tree** — open it with `Enter` (from the welcome screen) or `Ctrl+B`:
 `↑/↓` move · `→/←` expand/collapse · `Enter`/`Space` open · `Tab` to editor. It
-re-reads the folder as files appear or disappear. opencode starts on the
+re-reads the folder as files appear or disappear. ocode starts on the
 welcome screen; opening a file gives the editor the full screen.
 
 ## Terminal setup (macOS)
@@ -109,7 +109,7 @@ protocol** (Ghostty, Kitty).
 
 A scheme recolors only your **code** — your terminal background is untouched.
 **15 built in** (`base16-*`, Solarized, Dracula, One Dark, …); drop a `.tmTheme`
-into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
+into `~/.config/ocode/themes/` for more. Your pick is saved on first launch.
 
 ## Languages
 
@@ -129,18 +129,18 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 - **Web supersets** (alias): `.vue/.svelte/.astro → HTML`, `.scss/.sass/.less
   → CSS`, `.mdx → Markdown`.
 
-Add any `.sublime-syntax` grammar in `~/.config/opencode/syntaxes/`.
+Add any `.sublime-syntax` grammar in `~/.config/ocode/syntaxes/`.
 
 ## Images & other files
 
-Open an image — PNG, JPEG, GIF, BMP or WebP — and opencode draws it **inline**,
+Open an image — PNG, JPEG, GIF, BMP or WebP — and ocode draws it **inline**,
 scaled to fit, via the kitty graphics protocol (Ghostty, Kitty). Any other
 binary (PDF, archives, fonts, …) shows a labelled **hex preview** of its first
 bytes instead of failing to open.
 
 ## Changes on disk
 
-opencode watches the open file. If another program edits it: a **clean** buffer
+ocode watches the open file. If another program edits it: a **clean** buffer
 auto-reloads (undoable); with **unsaved edits** the status bar warns instead of
 overwriting — `Ctrl+R` to reload, or `Ctrl+S` twice to keep yours.
 

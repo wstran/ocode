@@ -43,7 +43,7 @@ type Painted = Option<(u64, (u16, u16, u16, u16))>;
 const MOUSE_ON: &[u8] = b"\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[>1s";
 const MOUSE_OFF: &[u8] = b"\x1b[>0s\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
-/// opencode — a fast terminal code reader & editor.
+/// ocode — a fast terminal code reader & editor.
 #[derive(Parser)]
 #[command(name = "ocode", version, about)]
 struct Cli {

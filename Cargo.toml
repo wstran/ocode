@@ -1,13 +1,13 @@
 [package]
-name = "opencode"
+name = "ocode"
 version = "1.0.7"
 edition = "2024"
 rust-version = "1.85"
 description = "A fast, no-frills terminal code reader and editor — open a file or folder and read syntax-highlighted code, then edit, all in your terminal."
 authors = ["Wilson Tran"]
 license = "MIT"
-repository = "https://github.com/wstran/opencode"
-homepage = "https://github.com/wstran/opencode"
+repository = "https://github.com/wstran/ocode"
+homepage = "https://github.com/wstran/ocode"
 readme = "README.md"
 keywords = ["tui", "editor", "terminal", "cli", "syntax"]
 categories = ["command-line-utilities", "text-editors"]

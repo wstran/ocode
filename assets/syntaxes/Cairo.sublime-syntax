@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Cairo (StarkNet) highlighting — Rust-like.
+# Authored for ocode (MIT). Minimal Cairo (StarkNet) highlighting — Rust-like.
 # Note: Cairo comments are // only; '#' starts an attribute, not a comment.
 name: Cairo
 file_extensions:

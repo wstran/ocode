@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal PowerShell highlighting.
+# Authored for ocode (MIT). Minimal PowerShell highlighting.
 # Block comments are <# ... #>.
 name: PowerShell
 file_extensions:

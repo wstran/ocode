@@ -1,35 +1,35 @@
 Bundled language grammars
 ==========================
 
-opencode ships syntect's 75 default grammars plus these extras:
+ocode ships syntect's 75 default grammars plus these extras:
 
   TOML        — upstream grammar, MIT.
                 https://github.com/jasonwilliams/sublime_toml_highlighting
 
-  DotENV      — authored for opencode (MIT). Minimal .env grammar.
-  INI         — authored for opencode (MIT). Sections / key=value / comments.
-  Dockerfile  — authored for opencode (MIT). Instructions / strings / vars.
-  TypeScript  — authored for opencode (MIT). .ts/.tsx/.mts/.cts.
-  Solidity    — authored for opencode (MIT). .sol.
-  Move        — authored for opencode (MIT). .move (Aptos/Sui).
-  Noir        — authored for opencode (MIT). .nr (Aztec).
-  Circom      — authored for opencode (MIT). .circom (zkSNARK circuits).
-  Cairo       — authored for opencode (MIT). .cairo (StarkNet).
-  Vyper       — authored for opencode (MIT). .vy (EVM).
-  Sway        — authored for opencode (MIT). .sw (Fuel).
-  Cadence     — authored for opencode (MIT). .cdc (Flow).
-  Leo         — authored for opencode (MIT). .leo (Aleo ZK).
-  Yul         — authored for opencode (MIT). .yul (EVM IR).
-  Huff        — authored for opencode (MIT). .huff (EVM assembly).
-  ZoKrates    — authored for opencode (MIT). .zok (ZK DSL).
-  Lean        — authored for opencode (MIT). .lean (theorem prover).
-  Protocol Buffers, GraphQL, HCL, Nix     — authored for opencode (MIT). Schema / IDL / infra.
-  Swift, Kotlin, Dart, Julia              — authored for opencode (MIT). Mobile / scientific.
+  DotENV      — authored for ocode (MIT). Minimal .env grammar.
+  INI         — authored for ocode (MIT). Sections / key=value / comments.
+  Dockerfile  — authored for ocode (MIT). Instructions / strings / vars.
+  TypeScript  — authored for ocode (MIT). .ts/.tsx/.mts/.cts.
+  Solidity    — authored for ocode (MIT). .sol.
+  Move        — authored for ocode (MIT). .move (Aptos/Sui).
+  Noir        — authored for ocode (MIT). .nr (Aztec).
+  Circom      — authored for ocode (MIT). .circom (zkSNARK circuits).
+  Cairo       — authored for ocode (MIT). .cairo (StarkNet).
+  Vyper       — authored for ocode (MIT). .vy (EVM).
+  Sway        — authored for ocode (MIT). .sw (Fuel).
+  Cadence     — authored for ocode (MIT). .cdc (Flow).
+  Leo         — authored for ocode (MIT). .leo (Aleo ZK).
+  Yul         — authored for ocode (MIT). .yul (EVM IR).
+  Huff        — authored for ocode (MIT). .huff (EVM assembly).
+  ZoKrates    — authored for ocode (MIT). .zok (ZK DSL).
+  Lean        — authored for ocode (MIT). .lean (theorem prover).
+  Protocol Buffers, GraphQL, HCL, Nix     — authored for ocode (MIT). Schema / IDL / infra.
+  Swift, Kotlin, Dart, Julia              — authored for ocode (MIT). Mobile / scientific.
   Verilog/SystemVerilog, VHDL, Assembly,
-  WebAssembly                             — authored for opencode (MIT). HDL / asm.
-  Zig, Elixir, F#, PowerShell, Bicep      — authored for opencode (MIT). Systems / .NET / Azure.
+  WebAssembly                             — authored for ocode (MIT). HDL / asm.
+  Zig, Elixir, F#, PowerShell, Bicep      — authored for ocode (MIT). Systems / .NET / Azure.
   Tact, FunC, Clarity, Aiken, LIGO,
-  Pact, TEAL, Scilla                      — authored for opencode (MIT). TON / Stacks / Cardano /
+  Pact, TEAL, Scilla                      — authored for ocode (MIT). TON / Stacks / Cardano /
                                             Tezos / Kadena / Algorand / Zilliqa contract languages.
 
 Extension aliases route superset / variant files to a built-in grammar:
@@ -40,5 +40,5 @@ Extension aliases route superset / variant files to a built-in grammar:
 `.mjs`, `.cjs` and `.jsx` are aliased to the built-in JavaScript grammar.
 
 Add your own: drop a `.sublime-syntax` file into
-  ~/.config/opencode/syntaxes/   (or $XDG_CONFIG_HOME/opencode/syntaxes/)
+  ~/.config/ocode/syntaxes/   (or $XDG_CONFIG_HOME/ocode/syntaxes/)
 and it is compiled into the syntax set at startup.

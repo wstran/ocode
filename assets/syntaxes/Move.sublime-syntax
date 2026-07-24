@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Move (Aptos/Sui) highlighting.
+# Authored for ocode (MIT). Minimal Move (Aptos/Sui) highlighting.
 name: Move
 file_extensions:
   - move

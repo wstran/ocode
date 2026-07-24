@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Pact (Kadena) highlighting.
+# Authored for ocode (MIT). Minimal Pact (Kadena) highlighting.
 # Lisp-like; comments are ;; (line).
 name: Pact
 file_extensions:

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Solidity highlighting.
+# Authored for ocode (MIT). Minimal Solidity highlighting.
 name: Solidity
 file_extensions:
   - sol

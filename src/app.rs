@@ -1123,7 +1123,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn app_with(name: &str, text: &str) -> App {
-        let path = std::env::temp_dir().join(format!("opencode_app_{name}.txt"));
+        let path = std::env::temp_dir().join(format!("ocode_app_{name}.txt"));
 
         fs::write(&path, text).unwrap();
 
@@ -1283,7 +1283,7 @@ mod tests {
     /// (which pops the browser) then clicking a file then Esc quitting outright.
     #[test]
     fn a_click_disarms_a_pending_esc_quit() {
-        let dir = std::env::temp_dir().join("opencode_esc_click");
+        let dir = std::env::temp_dir().join("ocode_esc_click");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -1318,7 +1318,7 @@ mod tests {
 
     #[test]
     fn mouse_open_keeps_the_sidebar_but_the_keyboard_still_closes_it() {
-        let dir = std::env::temp_dir().join("opencode_keep_sidebar");
+        let dir = std::env::temp_dir().join("ocode_keep_sidebar");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -1356,7 +1356,7 @@ mod tests {
     /// a second click on that same row opens it.
     #[test]
     fn first_tree_click_selects_and_only_the_second_opens() {
-        let dir = std::env::temp_dir().join("opencode_two_step_click");
+        let dir = std::env::temp_dir().join("ocode_two_step_click");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -1399,7 +1399,7 @@ mod tests {
     /// only the one after that quits.
     #[test]
     fn esc_peels_the_sidebar_then_reoffers_it_before_quitting() {
-        let dir = std::env::temp_dir().join("opencode_esc_peel");
+        let dir = std::env::temp_dir().join("ocode_esc_peel");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1451,7 +1451,7 @@ mod tests {
     /// arms the quit and leaves the sidebar alone.
     #[test]
     fn esc_with_focus_in_the_tree_keeps_the_old_behavior() {
-        let dir = std::env::temp_dir().join("opencode_esc_tree_focus");
+        let dir = std::env::temp_dir().join("ocode_esc_tree_focus");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1489,7 +1489,7 @@ mod tests {
     /// Shift+Tab still outdented.
     #[test]
     fn tab_indents_even_with_the_sidebar_open() {
-        let dir = std::env::temp_dir().join("opencode_tab_sidebar");
+        let dir = std::env::temp_dir().join("ocode_tab_sidebar");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1776,7 +1776,7 @@ mod tests {
 
     #[test]
     fn ctrl_slash_toggles_line_comment() {
-        let path = std::env::temp_dir().join("opencode_toggle_comment.rs");
+        let path = std::env::temp_dir().join("ocode_toggle_comment.rs");
 
         fs::write(&path, "let x = 1;\n").unwrap();
 
@@ -1860,7 +1860,7 @@ mod tests {
 
     #[test]
     fn a_folder_expands_on_a_single_click() {
-        let dir = std::env::temp_dir().join("opencode_folder_click");
+        let dir = std::env::temp_dir().join("ocode_folder_click");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1897,7 +1897,7 @@ mod tests {
     /// layout must not survive to open whatever now sits on that row.
     #[test]
     fn expanding_a_folder_drops_a_half_finished_file_click() {
-        let dir = std::env::temp_dir().join("opencode_click_shift");
+        let dir = std::env::temp_dir().join("ocode_click_shift");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1936,7 +1936,7 @@ mod tests {
     /// could open a row the keyboard had moved away from.
     #[test]
     fn a_keystroke_cancels_a_half_finished_click() {
-        let dir = std::env::temp_dir().join("opencode_click_rearm");
+        let dir = std::env::temp_dir().join("ocode_click_rearm");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -1967,7 +1967,7 @@ mod tests {
 
     #[test]
     fn tree_wheel_scrolls_the_list_without_moving_the_selection() {
-        let dir = std::env::temp_dir().join("opencode_tree_wheel");
+        let dir = std::env::temp_dir().join("ocode_tree_wheel");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -2263,7 +2263,7 @@ mod tests {
     }
 
     fn app_in_dir(name: &str) -> (App, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("opencode_dir_{name}"));
+        let dir = std::env::temp_dir().join(format!("ocode_dir_{name}"));
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -2334,7 +2334,7 @@ mod tests {
     }
 
     fn app_with_binary(name: &str) -> (App, PathBuf) {
-        let path = std::env::temp_dir().join(format!("opencode_bin_{name}.pdf"));
+        let path = std::env::temp_dir().join(format!("ocode_bin_{name}.pdf"));
 
         fs::write(&path, b"%PDF-1.4\n\x00\x01\x02binary").unwrap();
 
@@ -2490,7 +2490,7 @@ mod tests {
 
     #[test]
     fn switching_files_warns_then_discards() {
-        let dir = std::env::temp_dir().join("opencode_switch_test");
+        let dir = std::env::temp_dir().join("ocode_switch_test");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -2531,7 +2531,7 @@ mod tests {
 
     #[test]
     fn space_opens_file_in_tree() {
-        let dir = std::env::temp_dir().join("opencode_space_test");
+        let dir = std::env::temp_dir().join("ocode_space_test");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -2556,7 +2556,7 @@ mod tests {
 
     #[test]
     fn opening_a_file_from_tree_hides_it() {
-        let dir = std::env::temp_dir().join("opencode_hidetree_test");
+        let dir = std::env::temp_dir().join("ocode_hidetree_test");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -2583,7 +2583,7 @@ mod tests {
 
     #[test]
     fn save_conflict_needs_a_second_ctrl_s() {
-        let path = std::env::temp_dir().join("opencode_app_conflict.txt");
+        let path = std::env::temp_dir().join("ocode_app_conflict.txt");
 
         fs::write(&path, "v1\n").unwrap();
 
@@ -2614,7 +2614,7 @@ mod tests {
 
     #[test]
     fn ctrl_r_reloads_from_disk() {
-        let path = std::env::temp_dir().join("opencode_app_reload.txt");
+        let path = std::env::temp_dir().join("ocode_app_reload.txt");
 
         fs::write(&path, "v1\n").unwrap();
 

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal TEAL (Algorand) highlighting.
+# Authored for ocode (MIT). Minimal TEAL (Algorand) highlighting.
 name: TEAL
 file_extensions:
   - teal

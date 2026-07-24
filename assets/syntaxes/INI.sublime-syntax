@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Sections, comments and key = value pairs.
+# Authored for ocode (MIT). Sections, comments and key = value pairs.
 name: INI
 file_extensions:
   - ini

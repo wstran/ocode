@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Huff (EVM assembly) highlighting.
+# Authored for ocode (MIT). Minimal Huff (EVM assembly) highlighting.
 name: Huff
 file_extensions:
   - huff

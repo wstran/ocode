@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal GraphQL schema / query highlighting.
+# Authored for ocode (MIT). Minimal GraphQL schema / query highlighting.
 name: GraphQL
 file_extensions:
   - graphql

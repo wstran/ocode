@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Dart highlighting.
+# Authored for ocode (MIT). Minimal Dart highlighting.
 name: Dart
 file_extensions:
   - dart

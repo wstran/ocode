@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Elixir highlighting.
+# Authored for ocode (MIT). Minimal Elixir highlighting.
 name: Elixir
 file_extensions:
   - ex

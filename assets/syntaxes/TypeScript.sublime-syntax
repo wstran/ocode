@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal TypeScript highlighting: keywords,
+# Authored for ocode (MIT). Minimal TypeScript highlighting: keywords,
 # types, strings (incl. template literals), comments, numbers, decorators.
 # Not a full grammar — enough to read code comfortably.
 #

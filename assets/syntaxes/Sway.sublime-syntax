@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Sway (Fuel) highlighting — Rust-like.
+# Authored for ocode (MIT). Minimal Sway (Fuel) highlighting — Rust-like.
 name: Sway
 file_extensions:
   - sw

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Bicep (Azure ARM) highlighting.
+# Authored for ocode (MIT). Minimal Bicep (Azure ARM) highlighting.
 name: Bicep
 file_extensions:
   - bicep

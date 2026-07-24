@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Julia highlighting.
+# Authored for ocode (MIT). Minimal Julia highlighting.
 # Block comments use #= ... =# (not /* ... */).
 name: Julia
 file_extensions:

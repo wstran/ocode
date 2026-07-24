@@ -1,6 +1,6 @@
 //! Per-language comment tokens for the toggle-comment command.
 //!
-//! Line tokens for the grammars bundled with opencode are verified against the
+//! Line tokens for the grammars bundled with ocode are verified against the
 //! grammar files themselves by `tests::table_matches_bundled_grammars`, which
 //! reads each `comment.line.*` scope and checks it against this table. The
 //! remaining entries are standard tokens for syntect's built-in languages.

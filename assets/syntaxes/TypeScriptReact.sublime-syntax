@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). TypeScript / JavaScript with JSX (.tsx, .jsx).
+# Authored for ocode (MIT). TypeScript / JavaScript with JSX (.tsx, .jsx).
 #
 # Kept separate from TypeScript.sublime-syntax on purpose: `Array<string>` and
 # `<div>` are the same shape, so a grammar cannot have both JSX elements and

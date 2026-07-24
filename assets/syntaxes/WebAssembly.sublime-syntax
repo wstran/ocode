@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal WebAssembly text format (WAT) highlighting.
+# Authored for ocode (MIT). Minimal WebAssembly text format (WAT) highlighting.
 # Comments are ;; (line) and (; ... ;) (block) — S-expression style.
 name: WebAssembly
 file_extensions:

@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal FunC (TON) highlighting.
+# Authored for ocode (MIT). Minimal FunC (TON) highlighting.
 # Comments are ;; (line) and {- ... -} (block).
 name: FunC
 file_extensions:

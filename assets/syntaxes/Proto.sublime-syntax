@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Protocol Buffers (proto3) highlighting.
+# Authored for ocode (MIT). Minimal Protocol Buffers (proto3) highlighting.
 name: Protocol Buffers
 file_extensions:
   - proto

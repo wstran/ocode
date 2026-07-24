@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Lean 4 (theorem prover) highlighting.
+# Authored for ocode (MIT). Minimal Lean 4 (theorem prover) highlighting.
 # Note: comments are `--` (line) and `/- -/` (block) — not the C style.
 name: Lean
 file_extensions:

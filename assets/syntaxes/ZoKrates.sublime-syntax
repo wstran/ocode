@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal ZoKrates (ZK DSL) highlighting.
+# Authored for ocode (MIT). Minimal ZoKrates (ZK DSL) highlighting.
 name: ZoKrates
 file_extensions:
   - zok

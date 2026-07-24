@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Assembly (NASM / GAS / AT&T) highlighting.
+# Authored for ocode (MIT). Minimal Assembly (NASM / GAS / AT&T) highlighting.
 # Many dialects coexist: ';' (NASM) and '#' (AT&T) both start line comments.
 name: Assembly
 file_extensions:

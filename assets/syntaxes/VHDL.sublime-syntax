@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal VHDL highlighting.
+# Authored for ocode (MIT). Minimal VHDL highlighting.
 # Note: VHDL comments are `--` (line) — there are no /* */ block comments.
 name: VHDL
 file_extensions:

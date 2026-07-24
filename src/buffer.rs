@@ -1923,7 +1923,7 @@ mod tests {
 
     #[test]
     fn poll_auto_reloads_a_clean_buffer() {
-        let path = std::env::temp_dir().join("opencode_poll_clean.txt");
+        let path = std::env::temp_dir().join("ocode_poll_clean.txt");
 
         fs::write(&path, "v1\n").unwrap();
 
@@ -1948,7 +1948,7 @@ mod tests {
 
     #[test]
     fn poll_flags_conflict_for_a_dirty_buffer() {
-        let path = std::env::temp_dir().join("opencode_poll_conflict.txt");
+        let path = std::env::temp_dir().join("ocode_poll_conflict.txt");
 
         fs::write(&path, "v1\n").unwrap();
 
@@ -1981,7 +1981,7 @@ mod tests {
 
     #[test]
     fn poll_ignores_our_own_save() {
-        let path = std::env::temp_dir().join("opencode_poll_save.txt");
+        let path = std::env::temp_dir().join("ocode_poll_save.txt");
 
         fs::write(&path, "v1\n").unwrap();
 

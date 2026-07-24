@@ -31,17 +31,17 @@ type Seg = (String, Style);
 
 /// ASCII wordmark shown on the empty-state welcome screen, centered as a block.
 const LOGO: &[&str] = &[
-    r"  ___  _ __   ___ _ __   ___ ___   __| | ___ ",
-    r" / _ \| '_ \ / _ \ '_ \ / __/ _ \ / _ \|/ _ \",
-    r"| (_) | |_) |  __/ | | | (_| (_) | (_| |  __/",
-    r" \___/| .__/ \___|_| |_|\___\___/ \__,_|\___|",
-    r"      |_|",
+    r"                        _       ",
+    r"  ___    ___  ___    __| |  ___ ",
+    r" / _ \  / __|/ _ \  / _` | / _ \",
+    r"| (_) || (__| (_) || (_| ||  __/",
+    r" \___/  \___|\___/  \__,_| \___|",
 ];
 
 // Built with concat! so the leading indentation is part of each literal —
 // a `\`-continuation would let Rust strip the spaces and flatten the preview.
 const PREVIEW: &str = concat!(
-    "// opencode — preview of this style\n",
+    "// ocode — preview of this style\n",
     "use std::collections::HashMap;\n",
     "\n",
     "/// Greet a user by name.\n",
@@ -106,7 +106,7 @@ fn render_picker(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     .split(area);
 
     let title = Line::from(Span::styled(
-        format!("  opencode — choose a style ({count} available)"),
+        format!("  ocode — choose a style ({count} available)"),
         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
     ));
 
@@ -623,7 +623,7 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
         let mut left = vec![(" [TREE] ".to_string(), badge)];
 
         if app.status.is_empty() {
-            left.push(("opencode".to_string(), dim));
+            left.push(("ocode".to_string(), dim));
         } else {
             left.push((app.status.clone(), flash_style(app.status_ok)));
         }
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn editor_renders_code_with_line_numbers() {
-        let path = std::env::temp_dir().join("opencode_render_test.py");
+        let path = std::env::temp_dir().join("ocode_render_test.py");
 
         fs::write(&path, "def greet(name):\n    return name\n").unwrap();
 
@@ -848,7 +848,7 @@ mod tests {
     /// match (the selection) is tinted differently so it stands out among them.
     #[test]
     fn find_highlights_every_match_and_marks_the_current_one() {
-        let path = std::env::temp_dir().join("opencode_find_render.txt");
+        let path = std::env::temp_dir().join("ocode_find_render.txt");
 
         fs::write(&path, "foo and foo\n").unwrap();
 
@@ -899,7 +899,7 @@ mod tests {
     /// caret lands somewhere the user cannot see.
     #[test]
     fn find_scrolls_the_view_to_a_match_off_screen() {
-        let path = std::env::temp_dir().join("opencode_find_scroll.txt");
+        let path = std::env::temp_dir().join("ocode_find_scroll.txt");
 
         let mut text: String = (0..60).map(|i| format!("line {i}\n")).collect();
 
@@ -946,7 +946,7 @@ mod tests {
     /// Closing the find bar must take the tint with it.
     #[test]
     fn closing_find_clears_the_match_tint() {
-        let path = std::env::temp_dir().join("opencode_find_clear.txt");
+        let path = std::env::temp_dir().join("ocode_find_clear.txt");
 
         fs::write(&path, "foo and foo\n").unwrap();
 
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn status_bar_paints_no_opaque_background() {
-        let path = std::env::temp_dir().join("opencode_status_bg.rs");
+        let path = std::env::temp_dir().join("ocode_status_bg.rs");
 
         fs::write(&path, "fn main() {}\n").unwrap();
 
@@ -1011,7 +1011,7 @@ mod tests {
 
     #[test]
     fn render_records_the_editor_area_for_mouse_mapping() {
-        let path = std::env::temp_dir().join("opencode_mouse_area.rs");
+        let path = std::env::temp_dir().join("ocode_mouse_area.rs");
 
         fs::write(&path, "fn main() {}\n").unwrap();
 
@@ -1034,7 +1034,7 @@ mod tests {
     /// pane beside the tree rather than suppressed.
     #[test]
     fn image_renders_beside_an_open_sidebar() {
-        let dir = std::env::temp_dir().join("opencode_img_sidebar");
+        let dir = std::env::temp_dir().join("ocode_img_sidebar");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1091,7 +1091,7 @@ mod tests {
     /// leaves the first one on screen.
     #[test]
     fn switching_images_changes_the_placement() {
-        let dir = std::env::temp_dir().join("opencode_img_switch");
+        let dir = std::env::temp_dir().join("ocode_img_switch");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1149,7 +1149,7 @@ mod tests {
 
     #[test]
     fn image_is_centered_in_the_pane() {
-        let dir = std::env::temp_dir().join("opencode_img_center");
+        let dir = std::env::temp_dir().join("ocode_img_center");
 
         let _ = fs::remove_dir_all(&dir);
 
@@ -1180,7 +1180,7 @@ mod tests {
 
     #[test]
     fn tree_renders_directory() {
-        let dir = std::env::temp_dir().join("opencode_tree_test");
+        let dir = std::env::temp_dir().join("ocode_tree_test");
 
         let _ = fs::create_dir_all(&dir);
 
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn welcome_screen_shows_logo_when_no_file() {
-        let dir = std::env::temp_dir().join("opencode_welcome_test");
+        let dir = std::env::temp_dir().join("ocode_welcome_test");
 
         let _ = std::fs::create_dir_all(&dir);
 
@@ -1224,7 +1224,7 @@ mod tests {
 
     #[test]
     fn preview_keeps_indentation() {
-        let path = std::env::temp_dir().join("opencode_indent.rs");
+        let path = std::env::temp_dir().join("ocode_indent.rs");
 
         std::fs::write(&path, "x").unwrap();
 
@@ -1248,7 +1248,7 @@ mod tests {
 
     #[test]
     fn picker_lists_styles_with_preview() {
-        let path = std::env::temp_dir().join("opencode_picker_test.rs");
+        let path = std::env::temp_dir().join("ocode_picker_test.rs");
 
         fs::write(&path, "fn x() {}\n").unwrap();
 

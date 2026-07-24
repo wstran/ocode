@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Tact (TON) highlighting.
+# Authored for ocode (MIT). Minimal Tact (TON) highlighting.
 name: Tact
 file_extensions:
   - tact

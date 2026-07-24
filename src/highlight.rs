@@ -27,7 +27,7 @@ const BUNDLED: &[(&str, &str)] = &[
 ];
 
 /// Extra language grammars bundled on top of syntect's 75 defaults. TOML is the
-/// upstream MIT grammar; the rest are minimal grammars authored for opencode
+/// upstream MIT grammar; the rest are minimal grammars authored for ocode
 /// (the default Sublime set predates these modern languages).
 const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/TOML.sublime-syntax"),
@@ -123,7 +123,7 @@ impl SyntaxHighlighter {
             }
         }
 
-        if let Some(dir) = crate::config::syntaxes_dir() {
+        for dir in crate::config::syntaxes_dirs() {
             let _ = builder.add_from_folder(&dir, true);
         }
 
@@ -137,7 +137,7 @@ impl SyntaxHighlighter {
             }
         }
 
-        if let Some(dir) = crate::config::themes_dir() {
+        for dir in crate::config::themes_dirs() {
             load_user_themes(&dir, &mut themes);
         }
 

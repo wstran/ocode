@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Vyper (EVM) highlighting — Pythonic, so
+# Authored for ocode (MIT). Minimal Vyper (EVM) highlighting — Pythonic, so
 # comments use '#' and decorators use '@'.
 name: Vyper
 file_extensions:

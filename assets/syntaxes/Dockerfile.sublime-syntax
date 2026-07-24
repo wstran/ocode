@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Instructions, comments, strings and variables.
+# Authored for ocode (MIT). Instructions, comments, strings and variables.
 name: Dockerfile
 file_extensions:
   - Dockerfile

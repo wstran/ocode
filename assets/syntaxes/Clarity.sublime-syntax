@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Clarity (Stacks/Bitcoin) highlighting.
+# Authored for ocode (MIT). Minimal Clarity (Stacks/Bitcoin) highlighting.
 # Lisp-like; comments are ;; (line).
 name: Clarity
 file_extensions:

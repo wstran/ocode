@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Yul (EVM IR) highlighting.
+# Authored for ocode (MIT). Minimal Yul (EVM IR) highlighting.
 name: Yul
 file_extensions:
   - yul

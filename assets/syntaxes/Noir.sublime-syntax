@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Noir (Aztec ZK) highlighting — Rust-like.
+# Authored for ocode (MIT). Minimal Noir (Aztec ZK) highlighting — Rust-like.
 name: Noir
 file_extensions:
   - nr

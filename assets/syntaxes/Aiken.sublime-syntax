@@ -1,6 +1,6 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal Aiken (Cardano) highlighting.
+# Authored for ocode (MIT). Minimal Aiken (Cardano) highlighting.
 name: Aiken
 file_extensions:
   - ak

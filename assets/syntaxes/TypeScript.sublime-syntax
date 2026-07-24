@@ -1,12 +1,14 @@
 %YAML 1.2
 ---
-# Authored for opencode (MIT). Minimal TypeScript / TSX highlighting:
-# keywords, types, strings (incl. template literals), comments, numbers,
-# decorators. Not a full grammar — enough to read code comfortably.
+# Authored for opencode (MIT). Minimal TypeScript highlighting: keywords,
+# types, strings (incl. template literals), comments, numbers, decorators.
+# Not a full grammar — enough to read code comfortably.
+#
+# .tsx and .jsx use TypeScriptReact.sublime-syntax instead: JSX elements and
+# generics look alike, so the two cannot share one grammar.
 name: TypeScript
 file_extensions:
   - ts
-  - tsx
   - mts
   - cts
 scope: source.ts
@@ -52,9 +54,13 @@ contexts:
       scope: constant.character.escape.ts
     - match: '.'
       scope: string.quoted.other.ts
+  # Quoted strings are single-line, so they end at the newline too: without
+  # that, one half-typed quote colours every line below it as string.
   double_string:
     - match: '"'
       scope: punctuation.definition.string.end.ts
+      pop: true
+    - match: '$'
       pop: true
     - match: '\\.'
       scope: constant.character.escape.ts
@@ -63,6 +69,8 @@ contexts:
   single_string:
     - match: "'"
       scope: punctuation.definition.string.end.ts
+      pop: true
+    - match: '$'
       pop: true
     - match: '\\.'
       scope: constant.character.escape.ts

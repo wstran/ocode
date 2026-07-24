@@ -115,7 +115,8 @@ into `~/.config/opencode/themes/` for more. Your pick is saved on first launch.
 
 **118 languages** out of the box. Highlights:
 
-- **TypeScript** (`.ts/.tsx/.mts/.cts`); `.mjs/.cjs/.jsx` open as JavaScript.
+- **TypeScript** (`.ts/.mts/.cts`); `.tsx/.jsx` use a JSX-aware grammar that
+  highlights elements and attributes; `.mjs/.cjs` open as JavaScript.
 - **Schemas / config / infra**: Protocol Buffers, GraphQL, TOML, `.env`, INI,
   Dockerfile, HCL/Terraform, Nix, Bicep.
 - **Web3 / ZK**: Solidity, Vyper, Yul, Huff, Move, Cairo, Noir, Circom,

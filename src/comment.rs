@@ -31,7 +31,7 @@ const CSS: CommentStyle = CommentStyle { line: None, block: Some(("/*", "*/")) }
 pub fn for_syntax(name: &str) -> CommentStyle {
     match name {
         // Bundled grammars, C-family line comment (verified against the files).
-        "TypeScript" | "Solidity" | "Move" | "Noir" | "Circom" | "Cairo" | "Sway"
+        "TypeScript" | "TypeScript (JSX)" | "Solidity" | "Move" | "Noir" | "Circom" | "Cairo" | "Sway"
         | "Cadence" | "Leo" | "Yul" | "Huff" | "ZoKrates" | "Protocol Buffers" | "Swift"
         | "Kotlin" | "Dart" | "Verilog" | "Zig" | "Bicep" | "Tact" | "Aiken" | "LIGO"
         | "TEAL" => SLASH,

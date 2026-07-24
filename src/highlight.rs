@@ -35,6 +35,7 @@ const BUNDLED_SYNTAXES: &[&str] = &[
     include_str!("../assets/syntaxes/INI.sublime-syntax"),
     include_str!("../assets/syntaxes/Dockerfile.sublime-syntax"),
     include_str!("../assets/syntaxes/TypeScript.sublime-syntax"),
+    include_str!("../assets/syntaxes/TypeScriptReact.sublime-syntax"),
     include_str!("../assets/syntaxes/Solidity.sublime-syntax"),
     include_str!("../assets/syntaxes/Move.sublime-syntax"),
     include_str!("../assets/syntaxes/Noir.sublime-syntax"),
@@ -80,7 +81,11 @@ const BUNDLED_SYNTAXES: &[&str] = &[
 /// JSON-with-comments family falls back to JSON.
 fn alias_extension(ext: &str) -> Option<&'static str> {
     match ext {
-        "mjs" | "cjs" | "jsx" => Some("js"),
+        // `.jsx` deliberately absent: it resolves to the JSX grammar by
+        // extension. Sending it to the plain JavaScript grammar made a closing
+        // tag after `return` open a regex that never closed, which flattened the
+        // colours of every line below it.
+        "mjs" | "cjs" => Some("js"),
 
         "jsonc" | "json5" => Some("json"),
 
@@ -462,9 +467,11 @@ mod tests {
 
         for (file, want) in [
             ("app.ts", "TypeScript"),
-            ("App.tsx", "TypeScript"),
             ("mod.mts", "TypeScript"),
             ("mod.cts", "TypeScript"),
+            // JSX-capable files get the grammar that understands elements.
+            ("App.tsx", "TypeScript (JSX)"),
+            ("App.jsx", "TypeScript (JSX)"),
             ("Token.sol", "Solidity"),
             ("coin.move", "Move"),
             ("main.nr", "Noir"),
@@ -521,12 +528,72 @@ mod tests {
             ("style.sass", "CSS"),
             ("style.less", "CSS"),
             ("post.mdx", "Markdown"),
-            // JS variants alias onto the built-in JavaScript grammar.
+            // JS variants alias onto the built-in JavaScript grammar. `.jsx` is
+            // not among them: it can hold JSX, so it needs the JSX grammar.
             ("server.mjs", "JavaScript"),
             ("config.cjs", "JavaScript"),
-            ("App.jsx", "JavaScript"),
         ] {
             assert_eq!(h.syntax_name_for_path(Path::new(file)), want, "for {file}");
+        }
+    }
+
+    /// JSX used to poison the parser for the rest of the file: a closing tag
+    /// after `return` opened a regex that never closed, and an apostrophe in
+    /// JSX text opened a string that never closed. Either way every line below
+    /// collapsed to one colour.
+    #[test]
+    fn jsx_does_not_bleed_into_the_rest_of_the_file() {
+        let h = SyntaxHighlighter::new();
+
+        let cases = [
+            "function f() {\n  return <div>hi</div>;\n}\nconst tail = 42;\n",
+            "const el = <p>don't stop</p>;\nconst tail = 42;\n",
+            "function App() {\n  return (\n    <div className=\"a\">\n      <Item name='x' />\n      {n > 0 && <b>{n}</b>}\n    </div>\n  );\n}\nconst tail = 42;\n",
+        ];
+
+        for src in cases {
+            let lines = h.highlight_block(src, "tsx", h.current);
+
+            let last = lines
+                .iter()
+                .rev()
+                .find(|spans| spans.iter().any(|(_, t)| t.contains("tail")))
+                .expect("the trailing line is highlighted");
+
+            // The trailing line is ordinary code, so it must still be broken
+            // into several differently-styled spans rather than one flat run.
+            let styles: std::collections::BTreeSet<_> =
+                last.iter().map(|(style, _)| format!("{:?}", style.fg)).collect();
+
+            assert!(
+                styles.len() > 1,
+                "line after JSX collapsed to {} colour(s) in:\n{src}",
+                styles.len()
+            );
+        }
+    }
+
+    /// Generics are shaped exactly like a JSX element, so the JSX grammar must
+    /// not swallow `Array<string>` and treat everything after it as markup.
+    #[test]
+    fn generics_are_not_parsed_as_jsx() {
+        let h = SyntaxHighlighter::new();
+
+        for ext in ["ts", "tsx"] {
+            let src = "const a: Array<string> = [];\nconst tail = 42;\n";
+
+            let lines = h.highlight_block(src, ext, h.current);
+
+            let last = lines
+                .iter()
+                .rev()
+                .find(|spans| spans.iter().any(|(_, t)| t.contains("tail")))
+                .expect("the trailing line is highlighted");
+
+            let styles: std::collections::BTreeSet<_> =
+                last.iter().map(|(style, _)| format!("{:?}", style.fg)).collect();
+
+            assert!(styles.len() > 1, "generics broke highlighting in .{ext}");
         }
     }
 

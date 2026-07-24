@@ -1,0 +1,161 @@
+%YAML 1.2
+---
+# Authored for opencode (MIT). TypeScript / JavaScript with JSX (.tsx, .jsx).
+#
+# Kept separate from TypeScript.sublime-syntax on purpose: `Array<string>` and
+# `<div>` are the same shape, so a grammar cannot have both JSX elements and
+# generics without guessing. Files that can contain JSX use this one, plain .ts
+# keeps the non-JSX grammar and its generics.
+#
+# JSX children are their own context, so an apostrophe in text ("don't") is
+# text rather than the start of a string.
+name: TypeScript (JSX)
+file_extensions:
+  - tsx
+  - jsx
+scope: source.tsx
+contexts:
+  main:
+    - include: code
+
+  code:
+    - include: comments
+    - include: jsx_element
+    - include: literals
+    - include: words
+
+  comments:
+    - match: '//.*$'
+      scope: comment.line.double-slash.tsx
+    - match: '/\*'
+      scope: punctuation.definition.comment.tsx
+      push: block_comment
+
+  block_comment:
+    - match: '\*/'
+      scope: punctuation.definition.comment.tsx
+      pop: true
+    - match: '.'
+      scope: comment.block.tsx
+
+  literals:
+    - match: '`'
+      scope: punctuation.definition.string.begin.tsx
+      push: template_string
+    - match: '"'
+      scope: punctuation.definition.string.begin.tsx
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.tsx
+      push: single_string
+    - match: '@[A-Za-z_$][A-Za-z0-9_$]*'
+      scope: variable.annotation.tsx
+    - match: '\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?n?)\b'
+      scope: constant.numeric.tsx
+
+  words:
+    - match: '\b(true|false|null|undefined|NaN|Infinity)\b'
+      scope: constant.language.tsx
+    - match: '\b(this|super)\b'
+      scope: variable.language.tsx
+    - match: '\b(abstract|as|async|await|break|case|catch|class|const|continue|debugger|declare|default|delete|do|else|enum|export|extends|finally|for|from|function|get|if|implements|import|in|infer|instanceof|interface|is|keyof|let|module|namespace|new|of|override|package|private|protected|public|readonly|return|satisfies|set|static|switch|throw|try|type|typeof|var|void|while|with|yield)\b'
+      scope: keyword.control.tsx
+    - match: '\b(any|bigint|boolean|never|number|object|string|symbol|unknown|void)\b'
+      scope: storage.type.tsx
+
+  # A `<` only opens JSX when it does not follow an identifier character, which
+  # is what separates `return <div>` from `Array<string>` and `a<b`.
+  jsx_element:
+    - match: '(?<![A-Za-z0-9_$])<(?=[A-Za-z_$>])'
+      scope: punctuation.definition.tag.begin.tsx
+      push: jsx_tag
+
+  jsx_tag:
+    - match: '/>'
+      scope: punctuation.definition.tag.end.tsx
+      pop: true
+    - match: '>'
+      scope: punctuation.definition.tag.end.tsx
+      set: jsx_children
+    - match: '[A-Za-z_$][-A-Za-z0-9_$.]*(?=\s*=)'
+      scope: entity.other.attribute-name.tsx
+    - match: '[A-Za-z_$][-A-Za-z0-9_$.]*'
+      scope: entity.name.tag.tsx
+    - match: '"'
+      scope: punctuation.definition.string.begin.tsx
+      push: double_string
+    - match: "'"
+      scope: punctuation.definition.string.begin.tsx
+      push: single_string
+    - match: '\{'
+      scope: punctuation.section.embedded.begin.tsx
+      push: jsx_expression
+
+  # Text between tags. Nothing here starts a string, so "don't" stays text.
+  jsx_children:
+    - match: '</'
+      scope: punctuation.definition.tag.begin.tsx
+      set: jsx_closing_tag
+    - match: '<(?=[A-Za-z_$>])'
+      scope: punctuation.definition.tag.begin.tsx
+      push: jsx_tag
+    - match: '\{'
+      scope: punctuation.section.embedded.begin.tsx
+      push: jsx_expression
+    - match: '[^<{]+'
+
+  jsx_closing_tag:
+    - match: '>'
+      scope: punctuation.definition.tag.end.tsx
+      pop: true
+    - match: '[A-Za-z_$][-A-Za-z0-9_$.]*'
+      scope: entity.name.tag.tsx
+
+  # `{...}` inside JSX is ordinary code again, including nested JSX.
+  jsx_expression:
+    - match: '\}'
+      scope: punctuation.section.embedded.end.tsx
+      pop: true
+    - match: '\{'
+      push: jsx_expression_nested
+    - include: code
+
+  jsx_expression_nested:
+    - match: '\}'
+      pop: true
+    - match: '\{'
+      push: jsx_expression_nested
+    - include: code
+
+  # Single-line strings end at the newline, so one unterminated quote colours
+  # at most its own line instead of the rest of the file.
+  template_string:
+    - match: '`'
+      scope: punctuation.definition.string.end.tsx
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.tsx
+    - match: '.'
+      scope: string.quoted.other.tsx
+
+  double_string:
+    - match: '"'
+      scope: punctuation.definition.string.end.tsx
+      pop: true
+    - match: '$'
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.tsx
+    - match: '.'
+      scope: string.quoted.double.tsx
+
+  single_string:
+    - match: "'"
+      scope: punctuation.definition.string.end.tsx
+      pop: true
+    - match: '$'
+      pop: true
+    - match: '\\.'
+      scope: constant.character.escape.tsx
+    - match: '.'
+      scope: string.quoted.single.tsx

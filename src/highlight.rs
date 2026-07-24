@@ -217,10 +217,16 @@ impl SyntaxHighlighter {
             None => SynColor { r: 54, g: 78, b: 120, a: 255 },
         };
 
+        // Warm tint for search matches, mixed into the theme background so it
+        // stays readable on dark and light themes and reads as a different
+        // thing from the selection (which is the current match).
+        let amber = SynColor { r: 209, g: 154, b: 102, a: 255 };
+
         UiPalette {
             fg: syn_to_color(fg),
             dim: syn_to_color(blend(fg, bg, 0.5)),
             selection: syn_to_color(selection),
+            search_match: syn_to_color(blend(bg, amber, 0.45)),
         }
     }
 
@@ -692,6 +698,10 @@ pub struct UiPalette {
     pub dim: Color,
 
     pub selection: Color,
+
+    /// Background for search matches other than the current one, which is the
+    /// selection.
+    pub search_match: Color,
 }
 
 /// Perceived luminance in `0.0..=1.0` (Rec. 601 weights).

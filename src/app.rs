@@ -20,6 +20,9 @@ pub struct Search {
     pub query: String,
 }
 
+/// Longest selection that seeds the find query when Ctrl+F opens it.
+const SEARCH_SEED_MAX: usize = 100;
+
 /// Lines the editor view moves per wheel event.
 const EDITOR_SCROLL_STEP: isize = 3;
 
@@ -679,6 +682,13 @@ impl App {
             return;
         };
 
+        // A modified key is a command, not text. Without this Ctrl+S typed an
+        // "s" into the query instead of saving, and every other Ctrl combo
+        // likewise leaked its letter.
+        let modified = key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+
         match key.code {
             KeyCode::Esc => {
                 self.search = None;
@@ -686,15 +696,30 @@ impl App {
                 self.clear_flash();
             }
 
-            KeyCode::Backspace => {
+            KeyCode::Backspace if !modified => {
                 search.query.pop();
+
+                self.drop_current_match();
             }
 
             KeyCode::Enter => self.find_next(),
 
-            KeyCode::Char(c) => search.query.push(c),
+            KeyCode::Char(c) if !modified => {
+                search.query.push(c);
+
+                self.drop_current_match();
+            }
 
             _ => {}
+        }
+    }
+
+    /// The selection marks the current match, so editing the query drops it:
+    /// otherwise text that no longer matches would keep the current-match
+    /// highlight until the next Enter.
+    fn drop_current_match(&mut self) {
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.clear_selection();
         }
     }
 
@@ -1023,11 +1048,20 @@ impl App {
     }
 
     fn open_search(&mut self) {
-        if self.buffer.is_some() {
-            self.search = Some(Search {
-                query: String::new(),
-            });
-        }
+        let Some(buf) = self.buffer.as_ref() else {
+            return;
+        };
+
+        // Seed the query from the selection, the way an editor does. Only a
+        // single-line selection: the query cannot contain a newline (Enter runs
+        // the search), so a multi-line one could never match anything. The cap
+        // keeps a stray Ctrl+A out of the status bar.
+        let seed = buf
+            .selected_text()
+            .filter(|t| !t.contains('\n') && t.chars().count() <= SEARCH_SEED_MAX)
+            .unwrap_or_default();
+
+        self.search = Some(Search { query: seed });
     }
 
     fn find_next(&mut self) {
@@ -1035,20 +1069,33 @@ impl App {
             return;
         };
 
+        if query.is_empty() {
+            return;
+        }
+
         let Some(buf) = self.buffer.as_mut() else {
             return;
         };
 
-        let from = buf.char_idx() + 1;
-
-        let found = buffer::find_next(&buf.rope, &query, from);
-
-        if let Some(idx) = found {
-            buf.move_to_char(idx);
-        }
+        // Start at the caret, which sits at the end of the current match, so
+        // the next hit is the next non-overlapping one. Searching from caret+1
+        // instead would skip a match sitting exactly at the caret.
+        let found = buffer::find_next(&buf.rope, &query, buf.char_idx());
 
         match found {
-            Some(_) => self.flash(format!("Found '{query}'")),
+            Some(idx) => {
+                // Select the hit: it shows up as the current match, and Ctrl+C
+                // then copies exactly what was found.
+                buf.clear_selection();
+
+                buf.move_to_char(idx);
+
+                buf.sel(true);
+
+                buf.move_to_char(idx + query.chars().count());
+
+                self.flash(format!("Found '{query}'"));
+            }
 
             None => self.set_error(format!("Not found: '{query}'")),
         }
@@ -1563,6 +1610,170 @@ mod tests {
 
     /// Ctrl+/ arrives as Ctrl+7 on a legacy terminal and as Ctrl+/ under the
     /// kitty protocol; both must toggle the comment.
+    #[test]
+    fn ctrl_f_seeds_the_query_from_the_selection() {
+        let mut app = app_with("findseed", "alpha beta\ngamma\n");
+
+        // Select "alpha".
+        for _ in 0..5 {
+            app.on_key(shift(KeyCode::Right));
+        }
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        assert_eq!(app.search.as_ref().map(|s| s.query.as_str()), Some("alpha"));
+    }
+
+    /// The query can never contain a newline (Enter runs the search), so a
+    /// multi-line selection could not match anything and must not seed it.
+    #[test]
+    fn ctrl_f_ignores_a_multi_line_selection() {
+        let mut app = app_with("findmulti", "alpha\nbeta\n");
+
+        app.on_key(shift(KeyCode::Down));
+
+        app.on_key(shift(KeyCode::Right));
+
+        assert!(app.buffer.as_ref().unwrap().selected_text().unwrap().contains('\n'));
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        assert_eq!(app.search.as_ref().map(|s| s.query.as_str()), Some(""));
+    }
+
+    /// Select-all on a large file must not push the whole buffer into the
+    /// status bar.
+    #[test]
+    fn ctrl_f_ignores_an_oversized_selection() {
+        let long: String = "x".repeat(SEARCH_SEED_MAX + 1);
+
+        let mut app = app_with("findlong", &format!("{long}\n"));
+
+        app.on_key(ctrl(KeyCode::Char('a')));
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        assert_eq!(app.search.as_ref().map(|s| s.query.as_str()), Some(""));
+    }
+
+    #[test]
+    fn enter_selects_the_match_and_advances_through_hits() {
+        let mut app = app_with("findnav", "foo bar\nbaz foo\nfoo end\n");
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        for c in "foo".chars() {
+            app.on_key(plain(KeyCode::Char(c)));
+        }
+
+        // First Enter takes the match at the caret (line 0, col 0).
+        app.on_key(plain(KeyCode::Enter));
+
+        {
+            let buf = app.buffer.as_ref().unwrap();
+
+            assert_eq!(buf.selected_text().as_deref(), Some("foo"), "the hit is selected");
+
+            assert_eq!((buf.cursor_line, buf.cursor_col), (0, 3), "caret sits after the hit");
+        }
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_line, 1, "second hit is on line 1");
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_line, 2, "third hit is on line 2");
+
+        // Past the last hit it wraps back to the first.
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_line, 0, "wraps to the top");
+    }
+
+    /// Overlapping text must advance rather than re-select the same hit, which
+    /// would make Enter appear stuck.
+    #[test]
+    fn enter_advances_through_overlapping_text() {
+        let mut app = app_with("findoverlap", "aaaa\n");
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        app.on_key(plain(KeyCode::Char('a')));
+
+        app.on_key(plain(KeyCode::Char('a')));
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 2);
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 4, "moved on, not stuck");
+    }
+
+    /// While the find bar is open a modified key is a command, not text. This
+    /// used to type the letter into the query, so Ctrl+S wrote "s" instead of
+    /// saving.
+    #[test]
+    fn modified_keys_do_not_leak_into_the_query() {
+        let mut app = app_with("findmod", "hello\n");
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        app.on_key(ctrl(KeyCode::Char('s')));
+
+        app.on_key(ctrl(KeyCode::Char('c')));
+
+        app.on_key(nav(KeyCode::Char('d')));
+
+        assert_eq!(
+            app.search.as_ref().map(|s| s.query.as_str()),
+            Some(""),
+            "no modified key reached the query"
+        );
+    }
+
+    #[test]
+    fn editing_the_query_drops_the_current_match() {
+        let mut app = app_with("findedit", "foo bar\n");
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        for c in "foo".chars() {
+            app.on_key(plain(KeyCode::Char(c)));
+        }
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert!(app.buffer.as_ref().unwrap().selection().is_some());
+
+        // Editing the query means the old hit is no longer the current match.
+        app.on_key(plain(KeyCode::Backspace));
+
+        assert!(
+            app.buffer.as_ref().unwrap().selection().is_none(),
+            "the stale current-match highlight is cleared"
+        );
+    }
+
+    #[test]
+    fn enter_on_an_empty_query_does_nothing() {
+        let mut app = app_with("findempty", "hello\n");
+
+        app.on_key(ctrl(KeyCode::Char('f')));
+
+        app.on_key(plain(KeyCode::Enter));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert!(buf.selection().is_none());
+
+        assert_eq!(buf.cursor_col, 0);
+
+        assert!(app.status.is_empty(), "no 'not found' noise for an empty query");
+    }
+
     #[test]
     fn ctrl_slash_toggles_line_comment() {
         let path = std::env::temp_dir().join("opencode_toggle_comment.rs");

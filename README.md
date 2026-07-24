@@ -57,7 +57,7 @@ ocode --style       # change the color scheme
 | `Ctrl+A` | Select all |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `Ctrl+F` | Find |
+| `Ctrl+F` | Find — seeds from the selection, highlights every match, `Enter` jumps to the next |
 | `Ctrl+B` | File browser |
 | `Ctrl+R` | Reload from disk |
 | `Esc` | Clear selection; else arm quit (when editing a file it also opens the browser); again to quit |

@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, Focus};
-use crate::buffer::Buffer;
+use crate::buffer::{self, Buffer};
 use crate::highlight::UiPalette;
 use crate::media::{self, BinaryDoc, Media};
 
@@ -365,6 +365,16 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
         return;
     }
 
+    // Read before the buffer is borrowed mutably. Matches are recomputed per
+    // visible line each frame rather than cached, so an edit, an undo or a
+    // reload from disk can never leave stale positions painted on screen.
+    let query = app
+        .search
+        .as_ref()
+        .map(|s| s.query.clone())
+        .filter(|q| !q.is_empty())
+        .unwrap_or_default();
+
     let Some(buf) = app.buffer.as_mut() else {
         return;
     };
@@ -424,8 +434,35 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
         let sel = buf.selection_for_line(li);
 
+        let hits = if query.is_empty() {
+            Vec::new()
+        } else {
+            // Only scan as far as the rightmost visible column: a match that
+            // starts past it cannot be seen, and this keeps a minified
+            // one-megabyte line from being walked on every frame.
+            let limit = buf.scroll_col + text_width;
+
+            let text: String = buf
+                .rope
+                .line(li)
+                .chars()
+                .take_while(|c| *c != '\n')
+                .take(limit)
+                .collect();
+
+            buffer::match_columns(&text, &query)
+        };
+
         if let Some(cached) = buf.hl.line(li) {
-            spans.extend(slice_spans(cached, buf.scroll_col, text_width, sel, pal.selection));
+            spans.extend(slice_spans(
+                cached,
+                buf.scroll_col,
+                text_width,
+                sel,
+                pal.selection,
+                &hits,
+                pal.search_match,
+            ));
         }
 
         lines.push(Line::from(spans));
@@ -533,7 +570,7 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     let (left, right): (Vec<Seg>, Vec<Seg>) = if let Some(search) = &app.search {
         (
             vec![(" Find: ".to_string(), badge), (search.query.clone(), text)],
-            vec![(" Enter: next  Esc: close ".to_string(), dim)],
+            vec![(" Enter: next match  Esc: close ".to_string(), dim)],
         )
     } else if conflict {
         let buf = app.buffer.as_ref().unwrap();
@@ -707,6 +744,8 @@ fn slice_spans(
     width: usize,
     sel: Option<(usize, usize)>,
     sel_bg: Color,
+    hits: &[(usize, usize)],
+    hit_bg: Color,
 ) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
 
@@ -729,9 +768,15 @@ fn slice_spans(
             }
 
             if col >= start {
-                let selected = sel.is_some_and(|(a, b)| col >= a && col < b);
-
-                let cell_style = if selected { style.bg(sel_bg) } else { *style };
+                // The selection marks the current match, so it wins over the
+                // plain-match tint wherever both cover a cell.
+                let cell_style = if sel.is_some_and(|(a, b)| col >= a && col < b) {
+                    style.bg(sel_bg)
+                } else if hits.iter().any(|(a, b)| col >= *a && col < *b) {
+                    style.bg(hit_bg)
+                } else {
+                    *style
+                };
 
                 if chunk_style != Some(cell_style) {
                     flush_chunk(&mut out, &mut chunk, chunk_style);
@@ -795,6 +840,142 @@ mod tests {
         assert!(screen.contains("return name"), "second line missing");
 
         assert!(screen.contains("Ln 1, Col 1"), "status line missing");
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// Every occurrence is tinted while the find bar is open, and the current
+    /// match (the selection) is tinted differently so it stands out among them.
+    #[test]
+    fn find_highlights_every_match_and_marks_the_current_one() {
+        let path = std::env::temp_dir().join("opencode_find_render.txt");
+
+        fs::write(&path, "foo and foo\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+
+        for c in "foo".chars() {
+            app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char(c)));
+        }
+
+        app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter));
+
+        let (w, h) = (40u16, 4u16);
+
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        // Gutter is three digits plus a space, so text starts at column 4.
+        let bg_at = |x: u16| buffer.cell((x, 0)).unwrap().bg;
+
+        let current = bg_at(4); // first "foo", the hit Enter landed on
+
+        let other = bg_at(12); // second "foo" at column 8 of the text
+
+        let plain = bg_at(7); // the space after the first "foo"
+
+        assert_ne!(current, Color::Reset, "the current match is tinted");
+
+        assert_ne!(other, Color::Reset, "the other match is tinted too");
+
+        assert_ne!(current, other, "and the current match is told apart from it");
+
+        assert_eq!(plain, Color::Reset, "text outside a match keeps the terminal background");
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// Jumping to a match below the fold has to bring the view with it, or the
+    /// caret lands somewhere the user cannot see.
+    #[test]
+    fn find_scrolls_the_view_to_a_match_off_screen() {
+        let path = std::env::temp_dir().join("opencode_find_scroll.txt");
+
+        let mut text: String = (0..60).map(|i| format!("line {i}\n")).collect();
+
+        text.push_str("needle here\n");
+
+        fs::write(&path, &text).unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        assert_eq!(app.buffer.as_ref().unwrap().scroll_row, 0);
+
+        app.on_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+
+        for c in "needle".chars() {
+            app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char(c)));
+        }
+
+        app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Enter));
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert_eq!(buf.cursor_line, 60, "the caret is on the match");
+
+        assert!(buf.scroll_row > 0, "and the view followed it down");
+
+        let screen = format!("{}", terminal.backend());
+
+        assert!(screen.contains("needle here"), "the match is on screen:\n{screen}");
+
+        let _ = fs::remove_file(path);
+    }
+
+    /// Closing the find bar must take the tint with it.
+    #[test]
+    fn closing_find_clears_the_match_tint() {
+        let path = std::env::temp_dir().join("opencode_find_clear.txt");
+
+        fs::write(&path, "foo and foo\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.on_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+
+        for c in "foo".chars() {
+            app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char(c)));
+        }
+
+        app.on_key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Esc));
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 4)).unwrap();
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(
+            buffer.cell((12, 0)).unwrap().bg,
+            Color::Reset,
+            "no tint remains once find is closed"
+        );
 
         let _ = fs::remove_file(path);
     }

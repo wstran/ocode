@@ -1258,6 +1258,39 @@ impl Buffer {
 
 /// Find the next occurrence of `needle` at or after `from` (char index),
 /// wrapping around to the start. Returns the char index of the match.
+/// Char-column ranges of every non-overlapping `needle` in `text`, for painting
+/// search matches on a rendered line. Returns nothing for an empty needle: a
+/// zero-width match would never advance the scan.
+pub fn match_columns(text: &str, needle: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+
+    if needle.is_empty() {
+        return out;
+    }
+
+    let width = needle.chars().count();
+
+    let mut byte = 0;
+
+    let mut col = 0;
+
+    // Walk forward keeping a running char count, so a line with many matches
+    // costs one pass rather than one re-count per match.
+    while let Some(rel) = text[byte..].find(needle) {
+        let start = byte + rel;
+
+        col += text[byte..start].chars().count();
+
+        out.push((col, col + width));
+
+        col += width;
+
+        byte = start + needle.len();
+    }
+
+    out
+}
+
 pub fn find_next(rope: &Rope, needle: &str, from: usize) -> Option<usize> {
     if needle.is_empty() {
         return None;
@@ -1458,6 +1491,32 @@ mod tests {
         assert_eq!(b.rope.to_string(), "hello\n");
 
         assert!(!b.modified, "an unknown language leaves the buffer clean");
+    }
+
+    #[test]
+    fn match_columns_finds_every_hit_without_overlapping() {
+        assert_eq!(match_columns("a foo b foo", "foo"), vec![(2, 5), (8, 11)]);
+
+        // Non-overlapping: "aa" in "aaaa" is two matches, not three.
+        assert_eq!(match_columns("aaaa", "aa"), vec![(0, 2), (2, 4)]);
+
+        assert_eq!(match_columns("nothing here", "zzz"), vec![]);
+    }
+
+    /// An empty needle would match at every position without ever advancing the
+    /// scan, so it must yield nothing rather than spin.
+    #[test]
+    fn match_columns_ignores_an_empty_needle() {
+        assert_eq!(match_columns("anything", ""), vec![]);
+    }
+
+    /// Columns are counted in chars, matching how the renderer places cells, so
+    /// multi-byte text ahead of a match must not shift the highlight.
+    #[test]
+    fn match_columns_counts_chars_not_bytes() {
+        assert_eq!(match_columns("héllo wörld hi", "hi"), vec![(12, 14)]);
+
+        assert_eq!(match_columns("日本語 test", "test"), vec![(4, 8)]);
     }
 
     #[test]

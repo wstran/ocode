@@ -1,49 +1,184 @@
 %YAML 1.2
 ---
-# Authored for ocode (MIT). Minimal Lean 4 (theorem prover) highlighting.
-# Note: comments are `--` (line) and `/- -/` (block) — not the C style.
+# Authored for ocode (MIT). Lean 4 (theorem prover) highlighting.
+# Lexical rules checked against Lean 4.35. Keywords cross-checked with
+# vscode-lean4's grammar; tactic names against Lean core, Batteries, Aesop and
+# Mathlib source.
 name: Lean
 file_extensions:
   - lean
 scope: source.lean
+
+variables:
+  # Lean identifiers take letters, digits, subscripts and primes, and may end
+  # in `!` or `?` (`get!`, `exact?`). λ is reserved but sits in \p{L}, so the
+  # binder rule has to come first.
+  ident: '[\p{L}_][\p{L}\p{N}_'']*[!?]?'
+  # `\b` treats a subscript or a prime as the end of a word, but to Lean they
+  # continue the name: `forall₂_congr` is one identifier, not `forall`.
+  idend: '(?![\p{L}\p{N}_''])'
+  declname: '(?:{{ident}}|«[^»]*»)(?:\.(?:{{ident}}|«[^»]*»))*'
+  escape: '\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|.)'
+  tactic: '(?:intros?|rintro|exacts?|apply|refine|rfl|rw|rewrite|rwa|erw|nth_rewrite|nth_rw|simp|simp_all|simpa|dsimp|simp_wf|induction|cases|rcases|obtain|constructor|left|right|exfalso|contradiction|absurd|assumption|trivial|decide|native_decide|omega|grind|ext|funext|congr|gcongr|unfold|split|by_cases|by_contra|contrapose|push_neg|specialize|generalize|subst|subst_vars|symm|symm_saturate|trans|change|exact_mod_cast|assumption_mod_cast|mod_cast|push_cast|norm_cast|revert|clear|rename|rename_i|replace|next|case|all_goals|any_goals|first|repeat(?='')|focus|iterate|show_term|infer_instance|conv|and_intros|injection|done|skip|fail|stop|delta|with_reducible|apply_assumption|apply_rules|solve_by_elim|refine_lift|decreasing_tactic|use|existsi|norm_num1?|linarith|nlinarith|polyrith|positivity|ring|ring_nf|field_simp|aesop|tauto|bound|interval_cases|fin_cases|choose|lift|set|convert|convert_to|filter_upwards|fun_prop|simp_rw|classical|split_ifs|grw|ext1|congrm|conv_lhs|conv_rhs|lia|linear_combination|cat_disch|apply_fun|nontriviality|abel|wlog|slice_lhs|slice_rhs|ring1|push|bicategory|swap|introv|field|tfae_have|tfae_finish|algebraize|borelize|inhabit|on_goal|fapply|enter|clear_value|generalize_proofs|subsingleton|rotate_left|rotate_right|finiteness|rsuffices)'
+
 contexts:
   main:
+    - include: comments
+    - include: strings
+    # A name after a dot is a field or a namespace member, never a keyword:
+    # `Nat.rec`, `h.left`, `p.1`.
+    - match: '\.(?:{{ident}}|\d+)'
+    - match: '«[^»]*»'
+    - include: declarations
+    - include: tactics
+    - include: keywords
+    - include: literals
+    - include: names
+
+  comments:
     - match: '--.*$'
       scope: comment.line.double-dash.lean
+    - match: '/-[-!]'
+      push: doc_comment
     - match: '/-'
-      scope: punctuation.definition.comment.lean
       push: block_comment
-    - match: '"'
-      scope: punctuation.definition.string.begin.lean
-      push: double_string
-    - match: '\b(0[xX][0-9a-fA-F_]+|\d[\d_]*(\.[\d_]+)?)\b'
-      scope: constant.numeric.lean
-    - match: '\b(true|false|sorry)\b'
-      scope: constant.language.lean
-    - match: '\b(theorem|lemma|def|example|instance|class|structure|inductive|where|with|match|fun|do|let|mut|if|then|else|by|have|show|from|calc|namespace|open|import|variable|universe|section|end|deriving|abbrev|partial|mutual|macro|notation|attribute|set_option|return|try|catch|for|in|while|unless)\b'
-      scope: keyword.control.lean
-    - match: '\b(Nat|Int|Bool|String|Char|Float|Prop|Type|Sort|List|Array|Option|Unit|Fin)\b'
-      scope: storage.type.lean
-    # Three scopes carry most of the signal in a glance: what is called,
-    # what is a fixed value, and what is a type. Ordered so a call wins
-    # over the shape of its name.
-    - match: '\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()'
-      scope: entity.name.function.lean
-    - match: '\b[A-Z][A-Z0-9_]{2,}\b'
-      scope: constant.other.lean
-    - match: '\b[A-Z][A-Za-z0-9_]*\b'
-      scope: entity.name.class.lean entity.name.type.lean support.class.lean
+
+  # Lean block comments nest, so `/-` inside one opens another level.
   block_comment:
+    - meta_scope: comment.block.lean
+    - include: comment_body
+
+  doc_comment:
+    - meta_scope: comment.block.documentation.lean
+    - include: comment_body
+
+  comment_body:
     - match: '-/'
-      scope: punctuation.definition.comment.lean
       pop: true
-    - match: '.'
-      scope: comment.block.lean
-  double_string:
+    - match: '/-'
+      push: block_comment
+
+  strings:
+    - match: '\b[smf]!"'
+      push: interpolated_string
+    - match: '\br(#*)"'
+      push: raw_string
     - match: '"'
-      scope: punctuation.definition.string.end.lean
-      pop: true
-    - match: '\\.'
+      push: string
+    # A char literal may hold a double quote (`'"'`), which must not open a string.
+    - match: '''(?:[^\\'']|{{escape}})'''
+      scope: string.quoted.single.lean
+
+  string:
+    - meta_scope: string.quoted.double.lean
+    - match: '{{escape}}'
       scope: constant.character.escape.lean
-    - match: '.'
-      scope: string.quoted.double.lean
+    - match: '"'
+      pop: true
+
+  interpolated_string:
+    - meta_scope: string.interpolated.lean
+    - match: '{{escape}}'
+      scope: constant.character.escape.lean
+    - match: '"'
+      pop: true
+    - match: '\{'
+      scope: punctuation.section.interpolation.begin.lean
+      push: interpolation
+
+  interpolation:
+    - clear_scopes: 1
+    - meta_scope: meta.interpolation.lean
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.lean
+      pop: true
+    - include: main
+
+  # Mathlib writes doc comments inside attributes, `@[to_additive /-- ... -/]`,
+  # and those may hold brackets of their own, so an attribute is a context that
+  # keeps comments and strings and closes only at its own bracket.
+  attribute:
+    - meta_scope: entity.other.attribute-name.lean
+    - match: '\]'
+      pop: true
+    - match: '\['
+      push: attribute
+    - include: comments
+    - include: strings
+
+  # `r#"a "quoted" word"#` ends only at a quote followed by as many hashes.
+  raw_string:
+    - meta_scope: string.quoted.raw.lean
+    - match: '"\1'
+      pop: true
+
+  declarations:
+    - match: '\b(deriving)\s+(instance)\b'
+      captures:
+        1: keyword.other.lean
+        2: keyword.other.lean
+    - match: '\b(structure|class(?:\s+inductive)?|inductive|coinductive)\s+({{declname}})'
+      captures:
+        1: keyword.other.lean
+        2: entity.name.class.lean entity.name.type.lean support.class.lean
+    - match: '\b(theorem|lemma|def|abbrev|instance|axiom|opaque)\s+({{declname}})'
+      captures:
+        1: keyword.other.lean
+        2: entity.name.function.lean
+
+  # Tactic names are ordinary identifiers to Lean, and `left`, `set` or `use`
+  # are also common binder names. Colouring them everywhere would mislabel
+  # `obtain ⟨left, right⟩ := h`, so they are only coloured where a tactic
+  # starts: a line, or after `by`, `;`, `<;>`, `·`, `=>` or a combinator.
+  # A tactic is never followed by `:`, while a field is (`left : a` in `And`,
+  # `trans := ...` in an instance). `try` and `repeat` alone are do-notation
+  # keywords, so they only count as tactics in front of one.
+  tactics:
+    - match: '(?:^\s*|\b(by|decreasing_by)\s+|<;>\s*|;\s*|·\s*|=>\s*)((?:(?:try|repeat''?|all_goals|any_goals|focus)\s+)*)({{tactic}}(?:''+|[?!])?){{idend}}(?!\s*:)'
+      captures:
+        1: keyword.other.lean
+        2: support.function.tactic.lean
+        3: support.function.tactic.lean
+
+  keywords:
+    - match: '\b(?:private|protected|noncomputable|partial|unsafe|nonrec|public|meta|local|scoped){{idend}}'
+      scope: storage.modifier.lean
+    - match: '@\['
+      push: attribute
+    - match: '\b(attribute)\s*(\[)'
+      captures:
+        1: keyword.other.lean
+      push: attribute
+    # `#eval`, `#check`, `#print`, and Mathlib's `#find`, `#help`, ...; the
+    # \B keeps `x#y` out and `#[1, 2]` has no letter after the hash.
+    - match: '\B#[a-z_]+[!?]?'
+      scope: keyword.other.lean
+    - match: '\b(?:sorry|admit){{idend}}'
+      scope: constant.language.sorry.lean
+    - match: '\b(?:if|then|else|match|with|do|return|for|in|while|unless|repeat|break|continue|try|catch|finally|mut){{idend}}'
+      scope: keyword.control.lean
+    - match: '\b(?:theorem|lemma|def|abbrev|example|instance|class|structure|inductive|coinductive|axiom|opaque|where|extends|deriving|mutual|namespace|section|end|open|export|import|prelude|module|universe|variable|omit|include|set_option|notation|infix|infixl|infixr|prefix|postfix|macro|macro_rules|syntax|elab|elab_rules|declare_syntax_cat|initialize|builtin_initialize|termination_by|decreasing_by|partial_fixpoint|renaming|hiding|run_cmd|run_elab|run_meta|add_decl_doc|seal|unseal|fun|let|letI|have|haveI|show|from|suffices|calc|by|at|using|nomatch|nofun|forall|exists|rec|matches){{idend}}'
+      scope: keyword.other.lean
+    - match: '∀|∃!?|λ'
+      scope: keyword.other.lean
+
+  literals:
+    - match: '\b(?:true|false){{idend}}'
+      scope: constant.language.lean
+    - match: '\b(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?)\b'
+      scope: constant.numeric.lean
+    - match: '\b(?:Prop|Type|Sort)\b'
+      scope: storage.type.lean
+
+  # Three scopes carry most of the signal in a glance: what is called, what is
+  # a fixed value, and what is a type. Ordered so a call wins over the shape of
+  # its name. ℕ ℤ ℚ ℝ ℂ are uppercase letters to Unicode, so they read as types.
+  names:
+    - match: '{{ident}}(?=\s*\()'
+      scope: entity.name.function.lean
+    - match: '\b\p{Lu}[\p{Lu}\p{N}_]{2,}\b'
+      scope: constant.other.lean
+    - match: '\b\p{Lu}[\p{L}\p{N}_'']*'
+      scope: entity.name.class.lean entity.name.type.lean support.class.lean
+    # Consumed whole so a prime inside `h'` cannot start a char literal.
+    - match: '{{ident}}'

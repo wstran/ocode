@@ -407,6 +407,8 @@ impl SyntaxHighlighter {
 
             "make" | "makefile" => "make",
 
+            "lean4" => "lean",
+
             other => other,
         };
 
@@ -1147,6 +1149,268 @@ mod tests {
             let count: usize = spans.iter().map(|l| l.len()).sum();
 
             assert!(count > 1, "grammar for .{ext} did not tokenise ({count} spans)");
+        }
+    }
+
+    /// The scopes under the first `needle` on `line` of a Lean snippet, so a
+    /// test can say what a token is rather than what colour one theme gives it.
+    fn lean_scope_at(h: &SyntaxHighlighter, code: &str, line: usize, needle: &str) -> String {
+        let syntax = h.syntax_set.find_syntax_by_name("Lean").expect("the Lean grammar is bundled");
+
+        let mut parse = ParseState::new(syntax);
+
+        let mut stack = ScopeStack::new();
+
+        for (idx, text) in LinesWithEndings::from(code).enumerate() {
+            let ops = parse.parse_line(text, &h.syntax_set).expect("Lean parses");
+
+            let at = if idx == line {
+                text.find(needle).unwrap_or_else(|| panic!("{needle:?} is not on line {line}"))
+            } else {
+                usize::MAX
+            };
+
+            for (pos, op) in ops {
+                if pos > at {
+                    break;
+                }
+
+                stack.apply(&op).unwrap();
+            }
+
+            if idx == line {
+                return stack.as_slice().iter().map(|s| s.build_string()).collect::<Vec<_>>().join(" ");
+            }
+        }
+
+        panic!("line {line} is past the end of the snippet");
+    }
+
+    /// `'"'` is a char literal. Read as the start of a string, it ran to the
+    /// next quote in the file and swapped string and code colouring for
+    /// everything after it.
+    #[test]
+    fn lean_char_literal_can_hold_a_quote() {
+        let h = SyntaxHighlighter::new();
+
+        let code = "def q : Char := '\"'\ndef after := 42\ndef f (h' : Nat) := 'x'\n";
+
+        assert!(lean_scope_at(&h, code, 0, "'\"'").contains("string.quoted.single"));
+
+        assert!(lean_scope_at(&h, code, 1, "def").contains("keyword"), "the next line is code again");
+
+        assert!(lean_scope_at(&h, code, 1, "42").contains("constant.numeric"));
+
+        // A prime ends a name, it does not open a char literal.
+        assert!(!lean_scope_at(&h, code, 2, "Nat").contains("string"));
+
+        assert!(lean_scope_at(&h, code, 2, "'x'").contains("string.quoted.single"));
+    }
+
+    #[test]
+    fn lean_block_comments_nest() {
+        let h = SyntaxHighlighter::new();
+
+        let code = "/- outer /- inner -/ still comment -/\ndef x := 1\n/-- doc /- inner -/ still doc -/\n";
+
+        assert!(lean_scope_at(&h, code, 0, "still").contains("comment.block"));
+
+        assert!(lean_scope_at(&h, code, 1, "def").contains("keyword"));
+
+        assert!(lean_scope_at(&h, code, 2, "still").contains("comment.block.documentation"));
+    }
+
+    /// Tactic names are ordinary identifiers to Lean, so they are coloured
+    /// only where a tactic starts, never as the binder names they often share.
+    #[test]
+    fn lean_tactics_are_coloured_where_a_tactic_starts() {
+        let h = SyntaxHighlighter::new();
+
+        let code = concat!(
+            "example : P := by\n",
+            "  obtain ⟨left, right⟩ := h\n",
+            "  · exact right\n",
+            "  constructor <;> simp\n",
+            "theorem t : 1 = 1 := by rfl\n",
+            "  all_goals try simp_all\n",
+        );
+
+        let tactic = |line: usize, needle: &str| lean_scope_at(&h, code, line, needle).contains("tactic");
+
+        assert!(tactic(1, "obtain") && tactic(2, "exact") && tactic(3, "constructor") && tactic(3, "simp"));
+
+        assert!(tactic(4, "rfl") && tactic(5, "try") && tactic(5, "simp_all"));
+
+        assert!(!tactic(1, "left") && !tactic(1, "right") && !tactic(2, "right"), "binder names stay plain");
+
+        assert!(lean_scope_at(&h, code, 4, "by").contains("keyword"));
+    }
+
+    /// A field named like a tactic sits at the start of a line too, as `left`
+    /// and `right` do in `And`. So do `try` and `repeat` in do-notation.
+    #[test]
+    fn lean_fields_and_do_keywords_are_not_tactics() {
+        let h = SyntaxHighlighter::new();
+
+        let code = concat!(
+            "structure And' (a b : Prop) : Prop where\n",
+            "  left : a\n",
+            "instance : Trans r r r where\n",
+            "  trans := fun h₁ h₂ => h₁\n",
+            "def f : IO Unit := do\n",
+            "  try\n",
+            "  repeat\n",
+            "  repeat' simp\n",
+        );
+
+        let at = |line: usize, needle: &str| lean_scope_at(&h, code, line, needle);
+
+        assert!(!at(1, "left").contains("tactic") && !at(3, "trans").contains("tactic"), "fields stay plain");
+
+        assert!(at(5, "try").contains("keyword") && at(6, "repeat").contains("keyword"));
+
+        assert!(at(7, "repeat'").contains("tactic") && at(7, "simp").contains("tactic"));
+    }
+
+    /// A subscript or a prime continues a Lean name, so `forall₂_congr` is one
+    /// identifier rather than the keyword `forall`, and `exact₂'` is no tactic.
+    #[test]
+    fn lean_names_run_through_subscripts_and_primes() {
+        let h = SyntaxHighlighter::new();
+
+        let code = "  refine forall₂_congr fun b _ ↦ ?_\n  exact₂' (n : ℤ) : P n\n  in₀ a\n";
+
+        let at = |line: usize, needle: &str| lean_scope_at(&h, code, line, needle);
+
+        assert!(at(0, "refine").contains("tactic") && !at(0, "forall").contains("keyword"));
+
+        assert!(at(0, "fun").contains("keyword"));
+
+        assert!(!at(1, "exact").contains("tactic") && !at(2, "in").contains("keyword"));
+    }
+
+    #[test]
+    fn lean_literals_are_read_whole() {
+        let h = SyntaxHighlighter::new();
+
+        let code = concat!(
+            "def n := 0b1010 + 0o17 + 0xFF + 1.5e3 + 1_000\n",
+            "def r := r#\"has \"quotes\" inside\"# ++ x\n",
+            "def g := s!\"hi {name} and {\"}\"} done\"\n",
+        );
+
+        for needle in ["0b1010", "0o17", "0xFF", "e3", "_000"] {
+            assert!(lean_scope_at(&h, code, 0, needle).contains("constant.numeric"), "{needle}");
+        }
+
+        assert!(lean_scope_at(&h, code, 1, "inside").contains("string"));
+
+        assert!(!lean_scope_at(&h, code, 1, "++").contains("string"), "the raw string closes at \"#");
+
+        assert!(!lean_scope_at(&h, code, 2, "name").contains("string"), "interpolated code is code");
+
+        assert!(lean_scope_at(&h, code, 2, "done").contains("string"), "a nested string's brace does not close it");
+    }
+
+    #[test]
+    fn lean_declarations_and_commands() {
+        let h = SyntaxHighlighter::new();
+
+        let code = concat!(
+            "@[simp] private theorem add_zero' (n : ℕ) : n + 0 = n := sorry\n",
+            "#eval Nat.rec\n",
+            "noncomputable def f := 1\n",
+            "axiom ax : ∀ n : ℕ, n = n\n",
+        );
+
+        let at = |line: usize, needle: &str| lean_scope_at(&h, code, line, needle);
+
+        assert!(at(0, "@[simp]").contains("attribute-name"));
+
+        assert!(at(0, "private").contains("storage.modifier") && at(2, "noncomputable").contains("storage.modifier"));
+
+        for (line, needle) in [(0, "theorem"), (3, "axiom"), (3, "∀")] {
+            assert!(at(line, needle).contains("keyword"), "{needle}");
+        }
+
+        assert!(at(0, "add_zero'").contains("entity.name.function"), "the declared name");
+
+        assert!(at(0, "ℕ").contains("entity.name.type"), "ℕ is a type");
+
+        assert!(at(0, "sorry").contains("constant.language"));
+
+        assert!(at(1, "#eval").contains("keyword"));
+
+        assert!(!at(1, "rec").contains("keyword"), "a name after a dot is not a keyword");
+    }
+
+    /// Mathlib writes doc comments inside attributes, and those comments hold
+    /// brackets of their own. Ending the attribute at the first `]` swallowed
+    /// the comment opener and left the comment's text parsed as code.
+    #[test]
+    fn lean_attributes_can_hold_doc_comments() {
+        let h = SyntaxHighlighter::new();
+
+        let code = concat!(
+            "@[to_additive /-- `[x].sum = x` holds by\n",
+            "`rfl`. -/]\n",
+            "theorem prod_singleton : 1 = 1 := rfl\n",
+            "attribute [simp, norm_cast] foo\n",
+        );
+
+        let at = |line: usize, needle: &str| lean_scope_at(&h, code, line, needle);
+
+        assert!(at(0, "@[").contains("attribute-name") && at(0, "to_additive").contains("attribute-name"));
+
+        assert!(at(0, "holds").contains("comment.block.documentation"));
+
+        assert!(at(1, "rfl").contains("comment"), "the comment runs onto the next line");
+
+        assert!(at(2, "theorem").contains("keyword"), "and the attribute closes after it");
+
+        assert!(at(3, "norm_cast").contains("attribute-name") && !at(3, "foo").contains("attribute-name"));
+    }
+
+    /// The Lean grammar leans on scopes the others do not use: tactics are
+    /// `support.function`, modifiers `storage.modifier`. Each must be painted
+    /// by every bundled theme, or that token reads as ordinary text there.
+    #[test]
+    fn every_theme_paints_lean_tokens() {
+        use ropey::Rope;
+
+        let mut h = SyntaxHighlighter::new();
+
+        let rope = Rope::from_str("private theorem foo (n : ℕ) : n = n := by\n  simp\n#eval foo\n");
+
+        for idx in 0..h.theme_count() {
+            let name = h.theme_names()[idx].to_string();
+
+            h.set_theme(idx);
+
+            let mut cache = HlCache::new("Lean".to_string());
+
+            h.ensure(&mut cache, &rope, 4);
+
+            let spans: Vec<(Style, String)> = (0..3).filter_map(|l| cache.line(l)).flatten().cloned().collect();
+
+            let colour_of = |pred: &dyn Fn(&str) -> bool| {
+                spans.iter().find(|(_, t)| pred(t)).map(|(s, _)| s.fg).expect("the token is rendered")
+            };
+
+            let plain = colour_of(&|t| t.contains(":="));
+
+            for token in ["private", "foo", "ℕ", "simp", "#eval"] {
+                assert_ne!(colour_of(&|t| t.trim() == token), plain, "{name} paints {token} as plain text");
+            }
+        }
+    }
+
+    #[test]
+    fn lean_fences_resolve_by_either_tag() {
+        let h = SyntaxHighlighter::new();
+
+        for tag in ["lean", "lean4", "Lean4"] {
+            assert_eq!(h.syntax_for_tag(tag).map(|s| s.name.as_str()), Some("Lean"), "```{tag}");
         }
     }
 }

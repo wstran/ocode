@@ -562,6 +562,42 @@ impl Buffer {
         self.mark_edit(None);
     }
 
+    /// Make several replacements as one undo step. The ranges are char ranges
+    /// in the current text and must not overlap; the caret ends after the
+    /// first one's new text.
+    pub fn apply_edits(&mut self, edits: &[(std::ops::Range<usize>, String)]) {
+        let mut edits: Vec<&(std::ops::Range<usize>, String)> = edits.iter().collect();
+
+        edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+
+        let Some((first, first_text)) = edits.last().map(|(r, t)| (r.clone(), t.clone())) else {
+            return;
+        };
+
+        let len = self.rope.len_chars();
+
+        self.record(EditKind::Other, first.start.min(len), true);
+
+        // From the end backwards, so each edit leaves the ranges before it valid.
+        for (range, text) in edits {
+            let range = range.start.min(len)..range.end.min(len);
+
+            self.rope.remove(range.clone());
+
+            self.rope.insert(range.start, text);
+        }
+
+        self.anchor = None;
+
+        self.move_to_char(first.start + first_text.chars().count());
+
+        self.hl.invalidate(self.rope.char_to_line(first.start.min(self.rope.len_chars())));
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+    }
+
     /// Lean files get the unicode input of Lean's own editors.
     pub fn is_lean(&self) -> bool {
         self.hl.syntax_name() == "Lean"
@@ -1623,6 +1659,22 @@ mod tests {
 
         // The formerly out-of-range case must not panic when read.
         let _ = b.selected_text();
+    }
+
+    /// Several edits from Lean land as one undo step, wherever they are.
+    #[test]
+    fn edits_apply_together_and_undo_together() {
+        let mut b = buf("by\n  exact?\n  simp?\n");
+
+        b.apply_edits(&[(14..19, "simp only [h]".to_string()), (5..11, "exact h".to_string())]);
+
+        assert_eq!(b.rope.to_string(), "by\n  exact h\n  simp only [h]\n");
+
+        assert_eq!(b.char_idx(), 12, "the caret ends after the first edit");
+
+        b.undo();
+
+        assert_eq!(b.rope.to_string(), "by\n  exact?\n  simp?\n");
     }
 
     #[test]

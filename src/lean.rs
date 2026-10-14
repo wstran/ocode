@@ -38,6 +38,27 @@ pub struct Diagnostic {
     pub severity: Severity,
 
     pub message: String,
+
+    /// As the server sent it, to hand back when asking what can be done about
+    /// it.
+    raw: Value,
+}
+
+impl Diagnostic {
+    /// A suggestion Lean can apply, such as the proof `exact?` found.
+    pub fn suggests(&self) -> bool {
+        self.message.starts_with("Try this") || self.message.starts_with("Try these")
+    }
+}
+
+/// A change Lean offers to make, such as putting in the proof `exact?` found.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Action {
+    pub title: String,
+
+    /// What to replace and with what, as char ranges in the text the server
+    /// had when it offered the change.
+    pub edits: Vec<(Range<usize>, String)>,
 }
 
 /// What Lean says about the caret.
@@ -135,6 +156,12 @@ pub struct Session {
 
     /// The detail question in flight: its id and the name's index.
     resolving: Option<(i64, usize)>,
+
+    /// The question about what can be done at the caret, in flight.
+    acting: Option<i64>,
+
+    /// The changes offered, until the caller takes them.
+    actions: Option<Vec<Action>>,
 }
 
 struct Doc {
@@ -195,6 +222,8 @@ impl Session {
             completing: None,
             completions: None,
             resolving: None,
+            acting: None,
+            actions: None,
         })
     }
 
@@ -360,6 +389,10 @@ impl Session {
 
                 if id.is_some() && id == self.resolving.map(|(asked, _)| asked) {
                     return self.take_detail(&message["result"]);
+                }
+
+                if id.is_some() && id == self.acting {
+                    return self.take_actions(&message["result"]);
                 }
 
                 self.take_answer(id, &message)
@@ -569,6 +602,77 @@ impl Session {
         self.resolving = None;
     }
 
+    /// Ask what Lean can do on the caret's line, such as put in the proof that
+    /// `exact?` found there. The whole line is asked about: a suggestion is
+    /// tied to the span of the tactic that made it, which the caret may be
+    /// anywhere beside.
+    pub fn ask_actions(&mut self, at: usize) {
+        let Some(doc) = self.doc.as_ref().filter(|doc| doc.opened) else {
+            return;
+        };
+
+        let at = at.min(doc.synced.len_chars());
+
+        let line = doc.synced.char_to_line(at);
+
+        let line_start = doc.synced.line_to_char(line);
+
+        let line_end = line_start + doc.synced.line(line).chars().take_while(|c| *c != '\n' && *c != '\r').count();
+
+        let ((start_line, start_col), (end_line, end_col)) = (position(&doc.synced, line_start), position(&doc.synced, line_end));
+
+        let on_line: Vec<Value> = doc
+            .diagnostics
+            .iter()
+            .filter(|d| doc.synced.char_to_line(d.start.min(doc.synced.len_chars())) == line)
+            .map(|d| d.raw.clone())
+            .collect();
+
+        let id = self.server.request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": doc.uri },
+                "range": {
+                    "start": { "line": start_line, "character": start_col },
+                    "end": { "line": end_line, "character": end_col },
+                },
+                "context": { "diagnostics": on_line },
+            }),
+        );
+
+        self.acting = Some(id);
+
+        self.actions = None;
+    }
+
+    fn take_actions(&mut self, result: &Value) -> bool {
+        self.acting = None;
+
+        let Some(doc) = self.doc.as_ref() else {
+            return false;
+        };
+
+        let actions = result
+            .as_array()
+            .map(|list| list.iter().filter_map(|raw| action(doc, raw)).collect())
+            .unwrap_or_default();
+
+        self.actions = Some(actions);
+
+        true
+    }
+
+    /// The changes Lean offered, once: taking them clears them.
+    pub fn take_offered_actions(&mut self) -> Option<Vec<Action>> {
+        self.actions.take()
+    }
+
+    /// Whether the server's copy of the text is `text`, so ranges it gave
+    /// still point at the same characters.
+    pub fn in_step(&self, text: &Rope) -> bool {
+        self.doc.as_ref().is_some_and(|doc| doc.synced == *text)
+    }
+
     /// Ask for the type of the offered name at `index`, unless it is known or
     /// already asked for. One at a time: the one the user has selected.
     pub fn resolve(&mut self, index: usize) {
@@ -664,6 +768,7 @@ impl Session {
             || self.asking.is_some()
             || self.completing.is_some()
             || self.resolving.is_some()
+            || self.acting.is_some()
             || self.doc.as_ref().is_some_and(|doc| !doc.processing.is_empty())
             || self.last_sent.is_some_and(|at| at.elapsed() < ANSWER_WINDOW)
     }
@@ -688,6 +793,58 @@ impl Session {
 
         self.server.stop();
     }
+}
+
+/// A code action Lean offered, as edits to the open file. One without an edit
+/// (it would need resolving), one for an older version of the text, or one
+/// that touches another file is left out: none of them can be applied here as
+/// it stands.
+fn action(doc: &Doc, raw: &Value) -> Option<Action> {
+    let title = raw["title"].as_str()?.to_string();
+
+    let edit = raw.get("edit")?;
+
+    let mut edits = Vec::new();
+
+    let mut add = |list: &Value| -> Option<()> {
+        for e in list.as_array()? {
+            let range = &e["range"];
+
+            let start = char_index(&doc.synced, range["start"]["line"].as_u64()? as usize, range["start"]["character"].as_u64()? as usize);
+
+            let end = char_index(&doc.synced, range["end"]["line"].as_u64()? as usize, range["end"]["character"].as_u64()? as usize);
+
+            edits.push((start..end.max(start), e["newText"].as_str()?.to_string()));
+        }
+
+        Some(())
+    };
+
+    if let Some(changes) = edit["documentChanges"].as_array() {
+        for change in changes {
+            let target = &change["textDocument"];
+
+            if !target["uri"].as_str().is_some_and(|uri| same_uri(uri, &doc.uri)) {
+                return None;
+            }
+
+            if target["version"].as_i64().is_some_and(|v| v != doc.version) {
+                return None;
+            }
+
+            add(&change["edits"])?;
+        }
+    } else if let Some(changes) = edit["changes"].as_object() {
+        for (uri, list) in changes {
+            if !same_uri(uri, &doc.uri) {
+                return None;
+            }
+
+            add(list)?;
+        }
+    }
+
+    (!edits.is_empty()).then_some(Action { title, edits })
 }
 
 /// The tactic state in an answer to `$/lean/plainGoal`: `None` when the caret
@@ -750,6 +907,7 @@ fn diagnostic(text: &Rope, raw: &Value) -> Option<Diagnostic> {
         end: end.max(start),
         severity,
         message: raw["message"].as_str().unwrap_or_default().to_string(),
+        raw: raw.clone(),
     })
 }
 
@@ -962,6 +1120,8 @@ mod tests {
             completing: None,
             completions: None,
             resolving: None,
+            acting: None,
+            actions: None,
         };
 
         session.open(Path::new("/nonexistent/Test.lean"), &Rope::from_str(text));
@@ -1100,6 +1260,57 @@ mod tests {
         session.ask_goals(3);
 
         assert!(session.asking.is_some(), "a finished check asks again");
+    }
+
+    /// The code action Lean 4.35 sent for `exact?`, verbatim but for the URI,
+    /// and the cases that cannot be applied as they stand.
+    #[cfg(unix)]
+    #[test]
+    fn code_actions_become_edits_only_when_they_apply_here() {
+        let session = silent_session("theorem t (a b : Nat) : a + b = b + a := sorry\nexample (a b : Nat) : a + b = b + a := by\n  exact?\n");
+
+        let doc = session.doc.as_ref().unwrap();
+
+        let uri = doc.uri.clone();
+
+        let try_this = |version: Value, target: &str| {
+            json!({
+                "title": "Try this: exact t a b",
+                "kind": "quickfix",
+                "edit": { "documentChanges": [{
+                    "textDocument": { "uri": target, "version": version },
+                    "edits": [{
+                        "newText": "exact t a b",
+                        "range": { "start": { "line": 2, "character": 2 }, "end": { "line": 2, "character": 8 } },
+                    }],
+                }]},
+            })
+        };
+
+        let applied = action(doc, &try_this(json!(1), &uri)).expect("an edit to this file, at this version");
+
+        let mut text = doc.synced.clone();
+
+        for (range, new) in applied.edits.iter().rev() {
+            text.remove(range.clone());
+
+            text.insert(range.start, new);
+        }
+
+        assert!(text.to_string().ends_with("  exact t a b\n"), "{text}");
+
+        assert_eq!(action(doc, &try_this(json!(7), &uri)), None, "made for another version");
+
+        assert_eq!(action(doc, &try_this(json!(1), "file:///elsewhere/Other.lean")), None, "for another file");
+
+        let changes = json!({
+            "title": "t",
+            "edit": { "changes": { uri.clone(): [{ "newText": "x", "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 7 } } }] } },
+        });
+
+        assert_eq!(action(doc, &changes).map(|a| a.edits.len()), Some(1), "the older `changes` form");
+
+        assert_eq!(action(doc, &json!({ "title": "needs resolving", "data": {} })), None);
     }
 
     #[test]

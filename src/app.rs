@@ -12,6 +12,14 @@ use crate::lean;
 use crate::media::{self, Loaded, Media};
 use crate::tree::FileTree;
 
+/// Changes Lean offered for the caret's line, such as several proofs `apply?`
+/// found, waiting for one to be chosen.
+pub struct Choice {
+    pub actions: Vec<lean::Action>,
+
+    pub selected: usize,
+}
+
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum Focus {
     Tree,
@@ -165,6 +173,13 @@ pub struct App {
 
     /// Where the caret was drawn, to put the completion list under it.
     pub caret_cell: Option<(u16, u16)>,
+
+    /// Several suggestions from Lean to choose between.
+    pub choice: Option<Choice>,
+
+    /// Ctrl+T asked Lean what it can apply; its answer is acted on when it
+    /// comes.
+    actions_wanted: bool,
 }
 
 impl App {
@@ -245,6 +260,8 @@ impl App {
             completion: None,
             completion_wanted: false,
             caret_cell: None,
+            choice: None,
+            actions_wanted: false,
         })
     }
 
@@ -308,6 +325,8 @@ impl App {
                 KeyCode::Char('r') => return self.reload(),
 
                 KeyCode::Char('g') => return self.toggle_infoview(),
+
+                KeyCode::Char('t') => return self.ask_suggestion(),
 
                 // Ctrl+Space, where the system has not taken it for switching
                 // input sources; the list also opens by itself as names are typed.
@@ -376,6 +395,10 @@ impl App {
     }
 
     fn handle_escape(&mut self) {
+        if self.choice.take().is_some() {
+            return;
+        }
+
         if self.completion.as_ref().is_some_and(|p| p.shown) {
             self.close_completion();
 
@@ -684,7 +707,7 @@ impl App {
     }
 
     fn on_editor_key(&mut self, key: KeyEvent) {
-        if self.completion_key(key) {
+        if self.choice_key(key) || self.completion_key(key) {
             return;
         }
 
@@ -1176,6 +1199,14 @@ impl App {
             return;
         }
 
+        if self.actions_wanted {
+            if let Some(actions) = session.take_offered_actions() {
+                self.actions_wanted = false;
+
+                self.offer_actions(actions);
+            }
+        }
+
         self.refresh_completion();
     }
 
@@ -1378,6 +1409,92 @@ impl App {
                 session.resolve(index);
             }
         }
+    }
+
+    /// Ctrl+T: ask Lean what it can apply on the caret's line, such as the
+    /// proof `exact?` found. Its answer is acted on when it comes.
+    fn ask_suggestion(&mut self) {
+        let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) else {
+            return;
+        };
+
+        let line = buf.cursor_line;
+
+        let len = buf.rope.len_chars();
+
+        let anything = session.diagnostics().iter().any(|d| buf.rope.char_to_line(d.start.min(len)) == line);
+
+        if !anything {
+            return self.set_error("Lean has nothing to apply on this line".to_string());
+        }
+
+        session.ask_actions(buf.char_idx());
+
+        self.actions_wanted = true;
+    }
+
+    /// Act on what Lean offered: apply a single change, or let the user pick
+    /// between several.
+    fn offer_actions(&mut self, actions: Vec<lean::Action>) {
+        let in_step = match (self.lean.as_ref(), self.buffer.as_ref()) {
+            (Some(session), Some(buf)) => session.in_step(&buf.rope),
+
+            _ => false,
+        };
+
+        // Its ranges point into the text it had; typing since moved them.
+        if !in_step {
+            return self.set_error("The text changed before Lean answered: press Ctrl+T again".to_string());
+        }
+
+        match actions.len() {
+            0 => self.set_error("Lean has nothing to apply on this line".to_string()),
+
+            1 => self.apply_action(&actions[0]),
+
+            _ => self.choice = Some(Choice { actions, selected: 0 }),
+        }
+    }
+
+    fn apply_action(&mut self, action: &lean::Action) {
+        if let Some(buf) = self.buffer.as_mut() {
+            buf.apply_edits(&action.edits);
+        }
+
+        self.flash(format!("Applied: {}", action.title));
+    }
+
+    /// The keys the list of suggestions takes: arrows choose, Enter or Tab
+    /// applies. Returns whether the key was taken.
+    fn choice_key(&mut self, key: KeyEvent) -> bool {
+        let plain = key.modifiers.is_empty();
+
+        let Some(choice) = self.choice.as_mut() else {
+            return false;
+        };
+
+        let len = choice.actions.len();
+
+        match key.code {
+            KeyCode::Up if plain => choice.selected = (choice.selected + len - 1) % len,
+
+            KeyCode::Down if plain => choice.selected = (choice.selected + 1) % len,
+
+            KeyCode::Enter | KeyCode::Tab if plain => {
+                if let Some(choice) = self.choice.take() {
+                    self.apply_action(&choice.actions[choice.selected]);
+                }
+            }
+
+            // Anything else leaves the list behind and does what it does.
+            _ => {
+                self.choice = None;
+
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Show or hide the goals panel beside a Lean file.
@@ -3520,6 +3637,78 @@ mod tests {
         assert_eq!(text_of(&app), "def f (xs : List Nat) := xs.map\n");
 
         assert!(app.completion.is_none());
+
+        app.stop_lean();
+    }
+
+    /// Several suggestions are offered as a list: arrows choose, Enter applies
+    /// the chosen one, and any other key leaves the list behind.
+    #[test]
+    fn a_list_of_suggestions_applies_the_chosen_one() {
+        let mut app = lean_app("choice", "  apply?\n");
+
+        let offer = |title: &str| lean::Action { title: title.to_string(), edits: vec![(2..8, title.to_string())] };
+
+        app.choice = Some(Choice { actions: vec![offer("exact h"), offer("exact h.symm")], selected: 0 });
+
+        app.on_key(plain(KeyCode::Up));
+
+        assert_eq!(app.choice.as_ref().map(|c| c.selected), Some(1), "wraps to the last");
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(text_of(&app), "  exact h.symm\n");
+
+        assert!(app.choice.is_none());
+
+        app.choice = Some(Choice { actions: vec![offer("exact h")], selected: 0 });
+
+        app.on_key(plain(KeyCode::Esc));
+
+        assert!(app.choice.is_none() && !app.esc_confirm, "Esc closes it without arming the quit");
+    }
+
+    /// `exact?` and Ctrl+T against the real server: the proof Lean found
+    /// replaces the question.
+    /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_applies_what_exact_found() {
+        let source = concat!(
+            "theorem t (a b : Nat) : a + b = b + a := Nat.add_comm a b\n",
+            "example (a b : Nat) : a + b = b + a := by\n",
+            "  exact?\n",
+        );
+
+        let mut app = lean_app("server_try_this", source);
+
+        app.buffer.as_mut().unwrap().move_to_pos(2, 4);
+
+        let deadline = Instant::now() + Duration::from_secs(180);
+
+        while !app.lean.as_ref().is_some_and(|s| s.diagnostics().iter().any(|d| d.suggests()) && !s.checking()) {
+            assert!(Instant::now() < deadline, "no suggestion from exact?; status: {}", app.status);
+
+            app.service_lean();
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        app.on_key(ctrl(KeyCode::Char('t')));
+
+        while text_of(&app).contains("exact?") {
+            assert!(Instant::now() < deadline, "nothing applied; status: {}", app.status);
+
+            app.service_lean();
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let line = text_of(&app).lines().nth(2).unwrap().to_string();
+
+        assert!(line.starts_with("  exact ") && line.len() > "  exact ".len(), "{line}");
+
+        assert!(app.status.starts_with("Applied: Try this"), "{}", app.status);
 
         app.stop_lean();
     }

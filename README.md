@@ -77,6 +77,7 @@ application. Hold `Shift` with any motion to select instead of move.
 | `Ctrl+R` | Reload from disk |
 | `Ctrl+G` | Lean: show or hide the goals panel |
 | `Ctrl+Space` | Lean: offer names to complete the word (it also opens by itself) |
+| `Ctrl+T` | Lean: apply the suggestion on this line, from `exact?`, `apply?` or `simp?` |
 | `Ctrl+Q` | Quit |
 | `Esc` | Step back one layer: clear the selection, else hide the tree, else open it to pick another file. Again with nothing left to do quits |
 
@@ -219,6 +220,13 @@ Lines Lean is still checking are marked `│`. The server starts when a Lean fil
 opens and stops when it closes: `lake serve` inside a Lake project, so imports
 such as Mathlib resolve, or `lean --server` for a file on its own. Lean works
 while it checks; `ocode` only wakes to show what it found.
+
+**Try this.** Ask Lean to finish a step with `exact?`, `apply?` or `simp?`,
+and it answers with a suggestion on that line, which the status bar and the
+panel show in full. `Ctrl+T` puts it in place; when Lean offers several, pick
+one from the list with the arrows and `Enter`. It is one undo step, and if the
+text changed before Lean answered, nothing is applied and `ocode` asks you to
+press it again rather than edit the wrong place.
 
 **Completion.** Type a `.` after a name, or two letters of one, and Lean
 offers the names that fit, narrowing as you type: names that start with what

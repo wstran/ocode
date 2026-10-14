@@ -9,7 +9,7 @@ use crate::app::{App, Focus};
 use crate::buffer::{self, Buffer};
 use crate::highlight::UiPalette;
 use crate::complete;
-use crate::lean::{Completion, Diagnostic, Severity};
+use crate::lean::{Diagnostic, Severity};
 use crate::media::{self, Media};
 
 const TREE_WIDTH: u16 = 32;
@@ -272,7 +272,11 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
             out.push(Line::styled(label, Style::default().fg(severity_colour(d.severity))));
 
             for line in d.message.lines() {
-                out.extend(wrap(&[(Style::default().fg(pal.fg), line.to_string())], width));
+                out.extend(wrap(&[(Style::default().fg(pal.fg), line.replace("[apply] ", ""))], width));
+            }
+
+            if d.suggests() {
+                out.push(Line::styled("Ctrl+T applies it", dim));
             }
         }
     }
@@ -942,12 +946,14 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
     }
 
     render_completion(frame, app, area, pal);
+
+    render_choice(frame, app, area, pal);
 }
 
 /// The names Lean offers for the word being typed, in a box under the caret
 /// (over it near the bottom), with the selected name's type along its foot.
 fn render_completion(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
-    let (Some(popup), Some((cx, cy)), Some(buf), Some(session)) =
+    let (Some(popup), Some(caret), Some(buf), Some(session)) =
         (app.completion.as_ref(), app.caret_cell, app.buffer.as_ref(), app.lean.as_ref())
     else {
         return;
@@ -957,21 +963,68 @@ fn render_completion(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
         return;
     };
 
-    let rows: Vec<&Completion> = popup
+    let rows: Vec<String> = popup
         .matches
         .iter()
         .skip(popup.scroll)
         .take(complete::ROWS)
         .filter_map(|&i| items.get(i))
+        .map(|c| c.label.clone())
         .collect();
 
     let selected = popup.matches.get(popup.selected).and_then(|&i| items.get(i));
 
-    let detail = selected.map(|c| c.detail.clone().unwrap_or_else(|| "…".to_string())).unwrap_or_default();
+    let foot = selected.map(|c| c.detail.clone().unwrap_or_else(|| "…".to_string()));
 
-    let widest = rows.iter().map(|c| c.label.chars().count()).max().unwrap_or(0);
+    // Line the names up under the start of the word.
+    let typed = buf.char_idx().saturating_sub(popup.start) as u16;
 
-    let width = (widest.max(detail.chars().count().min(56)) + 4).clamp(24, 60).min(area.width as usize) as u16;
+    let list = ListBox { rows: &rows, selected: popup.selected - popup.scroll, foot, back: typed };
+
+    list_box(frame, area, caret, list, pal);
+}
+
+/// The suggestions from Lean to choose between, by their titles, at the caret.
+fn render_choice(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
+    let (Some(choice), Some(caret)) = (app.choice.as_ref(), app.caret_cell) else {
+        return;
+    };
+
+    let first = choice.selected.saturating_sub(complete::ROWS - 1);
+
+    let rows: Vec<String> =
+        choice.actions.iter().skip(first).take(complete::ROWS).map(|a| a.title.clone()).collect();
+
+    let foot = Some(format!("{} of {}  Enter applies", choice.selected + 1, choice.actions.len()));
+
+    let list = ListBox { rows: &rows, selected: choice.selected - first, foot, back: 0 };
+
+    list_box(frame, area, caret, list, pal);
+}
+
+/// What a list box under the caret shows.
+struct ListBox<'a> {
+    rows: &'a [String],
+
+    /// The row drawn as selected.
+    selected: usize,
+
+    /// A dim line along the bottom.
+    foot: Option<String>,
+
+    /// How far left of the caret the rows' text starts.
+    back: u16,
+}
+
+/// A bordered list under the caret, or over it near the bottom of `area`.
+fn list_box(frame: &mut Frame, area: Rect, (cx, cy): (u16, u16), list: ListBox, pal: UiPalette) {
+    let ListBox { rows, selected, foot, back } = list;
+
+    let foot = foot.unwrap_or_default();
+
+    let widest = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0);
+
+    let width = (widest.max(foot.chars().count().min(56)) + 4).clamp(24, 60).min(area.width as usize) as u16;
 
     let height = (rows.len() + 3) as u16;
 
@@ -979,29 +1032,29 @@ fn render_completion(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
         return;
     }
 
-    // Line the names up under the start of the word, its first letter under
-    // the box's first column of text.
-    let typed = buf.char_idx().saturating_sub(popup.start) as u16;
-
-    let x = cx.saturating_sub(typed + 2).clamp(area.x, area.x + area.width - width);
+    let x = cx.saturating_sub(back + 2).clamp(area.x, area.x + area.width - width);
 
     let y = if cy + 1 + height <= area.y + area.height { cy + 1 } else { cy.saturating_sub(height) };
 
     let rect = Rect { x, y, width, height };
 
-    let selection = Style::default().bg(pal.selection).fg(pal.fg);
+    let inner = width as usize - 3;
 
     let mut lines: Vec<Line> = rows
         .iter()
         .enumerate()
-        .map(|(row, c)| {
-            let style = if popup.scroll + row == popup.selected { selection } else { Style::default().fg(pal.fg) };
+        .map(|(row, text)| {
+            let style = if row == selected {
+                Style::default().bg(pal.selection).fg(pal.fg)
+            } else {
+                Style::default().fg(pal.fg)
+            };
 
-            Line::styled(format!(" {:w$}", clip(&c.label, width as usize - 3), w = width as usize - 3), style)
+            Line::styled(format!(" {:inner$}", clip(text, inner)), style)
         })
         .collect();
 
-    lines.push(Line::styled(format!(" {}", clip(&detail, width as usize - 3)), Style::default().fg(pal.dim)));
+    lines.push(Line::styled(format!(" {}", clip(&foot, inner)), Style::default().fg(pal.dim)));
 
     let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(pal.dim));
 
@@ -1289,12 +1342,31 @@ fn lean_status(app: &App, buf: &Buffer, dim: Style) -> Option<Seg> {
             Severity::Hint => "hint",
         };
 
-        let first = d.message.lines().next().unwrap_or_default();
+        let text = clip(&headline(&d.message), 70);
 
-        return Some((format!("{label}: {}   ", clip(first, 70)), Style::default().fg(severity_colour(d.severity))));
+        let key = if d.suggests() { "  (Ctrl+T)" } else { "" };
+
+        return Some((format!("{label}: {text}{key}   "), Style::default().fg(severity_colour(d.severity))));
     }
 
     session.checking().then(|| ("checking…   ".to_string(), dim))
+}
+
+/// The first line of a message, joined to the next when it only introduces it:
+/// Lean writes `Try this:` on a line of its own, above the suggestion. The
+/// `[apply]` marker is for editors with a clickable infoview.
+fn headline(message: &str) -> String {
+    let mut lines = message.lines().map(str::trim).filter(|l| !l.is_empty());
+
+    let first = lines.next().unwrap_or_default();
+
+    let line = match lines.next() {
+        Some(next) if first.ends_with(':') => format!("{first} {next}"),
+
+        _ => first.to_string(),
+    };
+
+    line.replace("[apply] ", "")
 }
 
 /// At most `max` chars of `text`, marking a cut with an ellipsis.
@@ -1540,6 +1612,13 @@ mod tests {
         assert!(text.ends_with("import Init.Prelude"), "emphasis stars go: {text}");
 
         assert!(!lines.windows(2).any(|w| w[0].is_empty() && w[1].is_empty()), "no stacked blank lines: {lines:#?}");
+    }
+
+    #[test]
+    fn a_suggestion_reads_on_one_line() {
+        assert_eq!(super::headline("Try this:\n  [apply] exact t a b"), "Try this: exact t a b");
+
+        assert_eq!(super::headline("Type mismatch\n  true\nhas type"), "Type mismatch", "a plain message keeps its first line");
     }
 
     #[test]

@@ -117,7 +117,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 fn infoview_width(app: &App, available: u16) -> Option<u16> {
     let lean_file = app.media.is_none() && app.buffer.as_ref().is_some_and(|b| b.is_lean());
 
-    (app.infoview && lean_file && app.lean.is_some() && available >= 72)
+    (app.infoview && lean_file && app.lean_here().is_some() && available >= 72)
         .then(|| (available * 2 / 5).clamp(30, 64))
 }
 
@@ -178,7 +178,7 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
 
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    let (Some(session), Some(buf)) = (app.lean.as_ref(), app.buffer.as_ref()) else {
+    let (Some(session), Some(buf)) = (app.lean_here(), app.buffer.as_ref()) else {
         return out;
     };
 
@@ -766,11 +766,15 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
         .filter(|q| !q.is_empty())
         .unwrap_or_default();
 
+    // Lean's diagnostics belong to the file it checks; a library file being
+    // read gets none of the project file's.
+    let checking_here = app.lean_here().is_some();
+
     let Some(buf) = app.buffer.as_mut() else {
         return;
     };
 
-    let lean = app.lean.as_ref();
+    let lean = app.lean.as_ref().filter(|_| checking_here);
 
     let height = area.height as usize;
 
@@ -954,7 +958,7 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 /// (over it near the bottom), with the selected name's type along its foot.
 fn render_completion(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     let (Some(popup), Some(caret), Some(buf), Some(session)) =
-        (app.completion.as_ref(), app.caret_cell, app.buffer.as_ref(), app.lean.as_ref())
+        (app.completion.as_ref(), app.caret_cell, app.buffer.as_ref(), app.lean_here())
     else {
         return;
     };
@@ -1314,7 +1318,7 @@ fn severity_colour(severity: Severity) -> Color {
 /// What Lean has to say at the cursor: the diagnostic under it (or else on its
 /// line), first line only, or that the server is starting or still checking.
 fn lean_status(app: &App, buf: &Buffer, dim: Style) -> Option<Seg> {
-    let session = app.lean.as_ref()?;
+    let session = app.lean_here()?;
 
     if session.starting() {
         let doing = session.last_log().map(|l| format!(": {}", clip(&l, 40))).unwrap_or_default();

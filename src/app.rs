@@ -51,6 +51,14 @@ const EDITOR_SCROLL_STEP: isize = 3;
 /// emits a burst of events per gesture, and a bigger step makes the list bolt.
 const TREE_SCROLL_STEP: isize = 1;
 
+/// A dependency's or a toolchain's Lean source is read, never edited, however
+/// it was reached: from the command line, the tree or a definition.
+fn mark_dependency(buf: &mut Buffer) {
+    if buf.is_lean() && lean::in_dependency(&buf.path) {
+        buf.read_only = true;
+    }
+}
+
 fn in_area(area: Option<(u16, u16, u16, u16)>, (col, row): (u16, u16)) -> bool {
     let Some((x, y, w, h)) = area else {
         return false;
@@ -215,7 +223,11 @@ impl App {
                 Loaded::Text => {
                     let syntax = highlighter.syntax_name_for_path(&path);
 
-                    (Some(Buffer::open(path.clone(), syntax)?), None, root, Focus::Editor, false)
+                    let mut buf = Buffer::open(path.clone(), syntax)?;
+
+                    mark_dependency(&mut buf);
+
+                    (Some(buf), None, root, Focus::Editor, false)
                 }
 
                 Loaded::Media(m) => (None, Some(m), root, Focus::Editor, false),
@@ -902,7 +914,9 @@ impl App {
             // behaviour. Ctrl+B is the way to reach the sidebar; Tab going there
             // would swallow indentation for as long as it is up.
             KeyCode::Tab => {
-                if !abbrev::complete(buf) {
+                let completed = abbrev::complete(buf);
+
+                if !completed {
                     buf.indent();
                 }
             }
@@ -1036,9 +1050,13 @@ impl App {
             }
         };
 
-        let Some((buffer, media)) = loaded else {
+        let Some((mut buffer, media)) = loaded else {
             return;
         };
+
+        if let Some(buf) = buffer.as_mut() {
+            mark_dependency(buf);
+        }
 
         self.buffer = buffer;
 
@@ -1194,14 +1212,9 @@ impl App {
 
         let read_only = self.buffer.as_ref().is_some_and(|b| b.read_only);
 
-        if !attached && read_only {
-            // A library file is read with the server already running, never a
-            // new one started in the library's folder, where `lake serve`
-            // could set about building Mathlib or Lean itself.
-            if let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) {
-                session.open(&path, &buf.rope);
-            }
-        } else if !attached && self.lean_failed.as_ref() != Some(&path) {
+        // A library file being read is never handed to Lean: the server keeps
+        // the project's own file, and comes back to it with Ctrl+O.
+        if !attached && !read_only && self.lean_failed.as_ref() != Some(&path) {
             self.attach_lean(&path);
         }
 
@@ -1209,7 +1222,9 @@ impl App {
             return;
         };
 
-        if let Some(buf) = self.buffer.as_ref() {
+        let here = session.path() == Some(path.as_path());
+
+        if let Some(buf) = self.buffer.as_ref().filter(|_| here) {
             // A half-typed `\forall` is not worth checking: the server would
             // flash an error for every letter of it.
             if buf.abbrev.is_none() {
@@ -1260,6 +1275,23 @@ impl App {
         }
 
         self.refresh_completion();
+    }
+
+    /// Lean's session, when it is checking the file on screen. What it says about
+    /// another file, such as the project file left to read a library one, must
+    /// not be drawn over this one.
+    pub fn lean_here(&self) -> Option<&lean::Session> {
+        let buf = self.buffer.as_ref()?;
+
+        self.lean.as_ref().filter(|s| s.path() == Some(buf.path.as_path()))
+    }
+
+    fn lean_here_mut(&mut self) -> Option<(&mut lean::Session, &Buffer)> {
+        let buf = self.buffer.as_ref()?;
+
+        let session = self.lean.as_mut().filter(|s| s.path() == Some(buf.path.as_path()))?;
+
+        Some((session, buf))
     }
 
     /// Point the server at `path`, starting one in its project if the running
@@ -1380,7 +1412,7 @@ impl App {
     }
 
     fn open_completion(&mut self) {
-        let Some(buf) = self.buffer.as_ref().filter(|b| b.is_lean() && b.abbrev.is_none()) else {
+        let Some(buf) = self.buffer.as_ref().filter(|b| b.is_lean() && b.abbrev.is_none() && !b.read_only) else {
             return;
         };
 
@@ -1466,7 +1498,7 @@ impl App {
     /// Ctrl+T: ask Lean what it can apply on the caret's line, such as the
     /// proof `exact?` found. Its answer is acted on when it comes.
     fn ask_suggestion(&mut self) {
-        let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) else {
+        let Some((session, buf)) = self.lean_here_mut() else {
             return;
         };
 
@@ -1578,7 +1610,11 @@ impl App {
     /// Ctrl+D or F12: ask Lean where the name at the caret is defined. Its
     /// answer is followed when it comes.
     fn ask_definition(&mut self) {
-        let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) else {
+        let Some((session, buf)) = self.lean_here_mut() else {
+            if self.buffer.as_ref().is_some_and(|b| b.read_only) {
+                self.set_error("Lean does not check library files here: Ctrl+O goes back".to_string());
+            }
+
             return;
         };
 
@@ -1622,7 +1658,7 @@ impl App {
             return self.set_error("Save first (Ctrl+S): the definition is in another file".to_string());
         }
 
-        let library = self.lean.as_ref().is_some_and(|s| !lean::inside(s.root(), &place.path));
+        let library = self.lean.as_ref().is_none_or(|s| lean::is_library(s.root(), &place.path));
 
         self.jumps.push(here);
 
@@ -4016,6 +4052,18 @@ mod tests {
 
         assert_eq!(rest, "succ", "the caret is on the name");
 
+        // It is not handed to Lean, and nothing Lean said about the project
+        // file is drawn over it.
+        for _ in 0..20 {
+            app.service_lean();
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(app.lean_here().is_none());
+
+        assert_eq!(app.lean.as_ref().and_then(|s| s.path()), Some(home.as_path()), "the server keeps the project file");
+
         app.on_key(ctrl(KeyCode::Char('o')));
 
         let buf = app.buffer.as_ref().unwrap();
@@ -4026,6 +4074,45 @@ mod tests {
 
         assert!(!buf.read_only);
 
+        assert!(app.lean_here().is_some(), "back to the file Lean checks");
+
         app.stop_lean();
+    }
+
+    /// Mathlib's source lives inside the project, under `.lake`. Opened from the
+    /// command line or the tree, it is still read-only, and no server is
+    /// started for it.
+    #[test]
+    fn lean_files_under_lake_open_read_only_by_any_route() {
+        let dir = std::env::temp_dir().join("ocode_app_lake_route");
+
+        let _ = fs::remove_dir_all(&dir);
+
+        let lib = dir.join(".lake/packages/mathlib/Mathlib");
+
+        fs::create_dir_all(&lib).unwrap();
+
+        let file = lib.join("Basic.lean");
+
+        fs::write(&file, "theorem t : True := trivial\n").unwrap();
+
+        let mut direct = App::new(file.clone(), false).unwrap();
+
+        direct.picker = None;
+
+        assert!(direct.buffer.as_ref().unwrap().read_only, "from the command line");
+
+        let mut tree = lean_app("lake_route_home", "");
+
+        tree.open_file(file.clone(), false);
+
+        assert!(tree.buffer.as_ref().unwrap().read_only, "from the tree");
+
+        // A read-only file never brings a server up.
+        direct.service_lean();
+
+        assert!(direct.lean.is_none());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

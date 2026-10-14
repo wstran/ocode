@@ -887,6 +887,30 @@ pub fn inside(root: &Path, path: &Path) -> bool {
     canonical(path).starts_with(canonical(root))
 }
 
+/// Whether `path` is library code to a project at `root`: outside it, as Lean's
+/// own source is, or inside it under `.lake`, where Lake keeps Mathlib and
+/// every other dependency.
+pub fn is_library(root: &Path, path: &Path) -> bool {
+    canonical(path).strip_prefix(canonical(root)).map_or(true, in_lake)
+}
+
+/// Whether `path` belongs to a dependency or a toolchain rather than to anyone's
+/// own project: anything under a `.lake` folder, or under `~/.elan`. Such a
+/// file is read, never edited, and never handed to Lean, since `lake
+/// setup-file` on a dependency's file sets that dependency up as a project of
+/// its own and fetches all its packages again inside it.
+pub fn in_dependency(path: &Path) -> bool {
+    let path = canonical(path);
+
+    let in_elan = std::env::var_os("HOME").is_some_and(|home| path.starts_with(canonical(&Path::new(&home).join(".elan"))));
+
+    in_elan || in_lake(&path)
+}
+
+fn in_lake(path: &Path) -> bool {
+    path.components().any(|part| part.as_os_str() == ".lake")
+}
+
 /// A code action Lean offered, as edits to the open file. One without an edit
 /// (it would need resolving), one for an older version of the text, or one
 /// that touches another file is left out: none of them can be applied here as
@@ -1683,6 +1707,22 @@ mod tests {
         assert!(doc.starts_with(&format!("{}/", uri_of(&root))), "{doc} is not under {}", uri_of(&root));
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Mathlib sits inside the project, under `.lake`, and is still a library.
+    #[test]
+    fn libraries_are_outside_the_project_or_under_its_lake_folder() {
+        let root = Path::new("/home/me/lean-math");
+
+        assert!(!is_library(root, Path::new("/home/me/lean-math/LeanMath/Basic.lean")));
+
+        assert!(is_library(root, Path::new("/home/me/lean-math/.lake/packages/mathlib/Mathlib/Data/Finset/Defs.lean")));
+
+        assert!(is_library(root, Path::new("/home/me/.elan/toolchains/v4/src/lean/Init/Prelude.lean")));
+
+        assert!(in_dependency(Path::new("/home/me/lean-math/.lake/packages/mathlib/Mathlib.lean")));
+
+        assert!(!in_dependency(Path::new("/home/me/lean-math/LeanMath/Basic.lean")));
     }
 
     #[test]

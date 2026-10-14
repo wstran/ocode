@@ -224,12 +224,13 @@ while it checks; `ocode` only wakes to show what it found.
 
 **Go to definition.** `Ctrl+D` (or `F12`) opens the definition of the name
 under the caret, in your project, in Mathlib or in Lean itself, and `Ctrl+O`
-comes back, as many steps as you went. A file outside your project opens
-read-only, marked `[READ]`, so a proof in Mathlib can be read, its goals
-stepped through and its names followed further, but not changed by accident.
-It is checked by the server already running rather than a new one started in
-the library's folder. With unsaved edits, `ocode` asks you to save before
-opening another file rather than putting them away.
+comes back, as many steps as you went. Mathlib, Lean's own source and anything
+else under a project's `.lake` folder opens read-only, marked `[READ]`, however
+you reach it, so it cannot be changed by accident. It is read, not checked:
+handed a dependency's file, Lake sets that dependency up as a project of its
+own and fetches its packages all over again, so the panel steps aside there and
+`Ctrl+O` takes you back to your own file. With unsaved edits, `ocode` asks you
+to save before opening another file rather than putting them away.
 
 **Try this.** Ask Lean to finish a step with `exact?`, `apply?` or `simp?`,
 and it answers with a suggestion on that line, which the status bar and the

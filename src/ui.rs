@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use crate::abbrev;
 use crate::app::{App, Focus};
 use crate::buffer::{self, Buffer};
 use crate::highlight::UiPalette;
@@ -453,16 +454,25 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
             buffer::match_columns(&text, &query)
         };
 
+        // A Lean abbreviation being typed is underlined until it is replaced,
+        // the way Lean's own editors mark it. It never spans a line break.
+        let underline = buf.abbrev.as_ref().and_then(|tracked| {
+            let line_start = buf.rope.line_to_char(li);
+
+            (tracked.start >= line_start && tracked.end() <= line_start + buf.line_len(li))
+                .then(|| (tracked.start - line_start, tracked.end() - line_start))
+        });
+
+        let marks = Marks {
+            selection: sel,
+            selection_bg: pal.selection,
+            hits: &hits,
+            hit_bg: pal.search_match,
+            underline,
+        };
+
         if let Some(cached) = buf.hl.line(li) {
-            spans.extend(slice_spans(
-                cached,
-                buf.scroll_col,
-                text_width,
-                sel,
-                pal.selection,
-                &hits,
-                pal.search_match,
-            ));
+            spans.extend(slice_spans(cached, buf.scroll_col, text_width, &marks));
         }
 
         lines.push(Line::from(spans));
@@ -658,10 +668,17 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
             left.push((format!("  {}", app.status), flash_style(app.status_ok)));
         }
 
-        (
-            left,
-            vec![(format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), dim)],
-        )
+        let mut right = Vec::new();
+
+        // In a Lean file: what an abbreviation being typed will become, or how
+        // to type the symbol at the cursor.
+        if let Some(hint) = abbrev::hint(buf) {
+            right.push((format!("{hint}   "), text));
+        }
+
+        right.push((format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), dim));
+
+        (left, right)
     } else if let Some(m) = &app.media {
         let (path, info) = match m {
             Media::Image(d) => (
@@ -807,19 +824,25 @@ fn scroll_into_view(buf: &mut Buffer, height: usize, text_width: usize) {
     }
 }
 
+/// What is drawn over the highlighted text of one line, in line-relative char
+/// columns.
+struct Marks<'a> {
+    selection: Option<(usize, usize)>,
+
+    selection_bg: Color,
+
+    hits: &'a [(usize, usize)],
+
+    hit_bg: Color,
+
+    underline: Option<(usize, usize)>,
+}
+
 /// Take the slice of highlighted spans visible in `[start, start + width)`
 /// display columns, expanding tabs to a single space so columns stay aligned
-/// with the cursor (which counts one column per char). Columns inside `sel`
-/// (line-relative char range) get the selection background.
-fn slice_spans(
-    spans: &[(Style, String)],
-    start: usize,
-    width: usize,
-    sel: Option<(usize, usize)>,
-    sel_bg: Color,
-    hits: &[(usize, usize)],
-    hit_bg: Color,
-) -> Vec<Span<'static>> {
+/// with the cursor (which counts one column per char), and apply `marks`: the
+/// selection background, the search-match tint and the abbreviation underline.
+fn slice_spans(spans: &[(Style, String)], start: usize, width: usize, marks: &Marks) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
 
     if width == 0 {
@@ -843,13 +866,17 @@ fn slice_spans(
             if col >= start {
                 // The selection marks the current match, so it wins over the
                 // plain-match tint wherever both cover a cell.
-                let cell_style = if sel.is_some_and(|(a, b)| col >= a && col < b) {
-                    style.bg(sel_bg)
-                } else if hits.iter().any(|(a, b)| col >= *a && col < *b) {
-                    style.bg(hit_bg)
+                let mut cell_style = if marks.selection.is_some_and(|(a, b)| col >= a && col < b) {
+                    style.bg(marks.selection_bg)
+                } else if marks.hits.iter().any(|(a, b)| col >= *a && col < *b) {
+                    style.bg(marks.hit_bg)
                 } else {
                     *style
                 };
+
+                if marks.underline.is_some_and(|(a, b)| col >= a && col < b) {
+                    cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
+                }
 
                 if chunk_style != Some(cell_style) {
                     flush_chunk(&mut out, &mut chunk, chunk_style);
@@ -882,9 +909,10 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     use crate::app::App;
 
@@ -894,6 +922,42 @@ mod tests {
         terminal.draw(|frame| super::render(frame, app)).unwrap();
 
         format!("{}", terminal.backend())
+    }
+
+    /// A Lean abbreviation being typed is underlined in place, and the status
+    /// bar says what it will become.
+    #[test]
+    fn a_lean_abbreviation_is_underlined_and_explained() {
+        let path = std::env::temp_dir().join("ocode_render_abbrev.lean");
+
+        fs::write(&path, "").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        for ch in "x \\al".chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 5)).unwrap();
+
+        terminal.draw(|frame| super::render(frame, &mut app)).unwrap();
+
+        let screen = terminal.backend().buffer();
+
+        let underlined = |x: u16| screen.cell((x, 0)).unwrap().modifier.contains(Modifier::UNDERLINED);
+
+        // A three-digit gutter and a space put column 0 of the text at x = 4.
+        assert!((6..9).all(underlined), "\\al is underlined");
+
+        assert!(!underlined(4) && !underlined(5) && !underlined(9), "and nothing else is");
+
+        let status: String = (0..100).map(|x| screen.cell((x, 4)).unwrap().symbol().to_string()).collect();
+
+        assert!(status.contains("\\al → ∀"), "status bar: {status}");
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

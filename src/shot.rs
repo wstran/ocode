@@ -120,6 +120,10 @@ mod shots {
                     style.push_str(" font-style=\"italic\"");
                 }
 
+                if modifier.contains(Modifier::UNDERLINED) {
+                    style.push_str(" text-decoration=\"underline\"");
+                }
+
                 out.push_str(&format!(
                     "<text x=\"{tx:.1}\" y=\"{ty:.1}\" fill=\"{}\" textLength=\"{len:.1}\" \
                      lengthAdjust=\"spacingAndGlyphs\" xml:space=\"preserve\"{style}>{}</text>\n",

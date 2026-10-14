@@ -189,6 +189,41 @@ alone, so notes in a `.txt` are not painted like code.
 
 Add any `.sublime-syntax` grammar in `~/.config/ocode/syntaxes/`.
 
+## Lean
+
+Lean 4 gets more than colours, because `ocode` is meant to be somewhere to
+learn and write proofs.
+
+**Highlighting.** Tactics have a colour of their own, so the steps of a proof
+stand out from the terms around them. They are coloured only where a tactic
+starts (a new line, or after `by`, `;`, `<;>`, `·` or `=>`), never as the
+hypothesis names they often share, like `left` and `right`. Nested and doc
+comments, char literals, raw and interpolated strings and `«quoted»` names read
+the way Lean reads them.
+
+**Unicode input.** Type `\` and a name, and the symbol takes its place as you
+type, with the same abbreviations as the official Lean editors:
+
+| You type | You get |
+|----------|---------|
+| `\forall` `\all` · `\exists` `\ex` | `∀` · `∃` |
+| `\to` `\->` · `\iff` | `→` · `↔` |
+| `\and` `\or` `\not` | `∧` `∨` `¬` |
+| `\ne` `\le` `\ge` · `\in` `\sub` | `≠` `≤` `≥` · `∈` `⊆` |
+| `\N` `\Z` `\Q` `\R` `\C` | `ℕ` `ℤ` `ℚ` `ℝ` `ℂ` |
+| `\a` `\b` · `\fun` · `\1` `\^2` | `α` `β` · `λ` · `₁` `²` |
+| `\<>` · `\x` `\circ` | `⟨⟩` with the caret inside · `×` `∘` |
+
+An abbreviation is underlined while you type it. It is replaced as soon as it
+can only mean one thing, or when the next character cannot continue it, such
+as a space or a bracket. `Tab` replaces it early with the shortest abbreviation
+that fits, `Esc` keeps it as typed (for a `\t` you meant literally), and `\\`
+gives a backslash. Undo brings back what you typed.
+
+The status bar says what the abbreviation will become and what else it could.
+With the caret on a symbol, it shows how to type that symbol, so a proof you
+are reading teaches you how to write the next one.
+
 ## Images, binaries and metadata
 
 Open a PNG, JPEG, GIF, BMP or WebP and it is drawn inline, scaled to fit and
@@ -264,8 +299,10 @@ themes in `themes/`, extra grammars in `syntaxes/`. The pre-rename location
 
 ## License
 
-[MIT](LICENSE). Bundled themes and grammars are MIT by their authors, see the
-`NOTICE` files. Built with [ratatui](https://github.com/ratatui/ratatui),
+[MIT](LICENSE). Bundled themes and grammars are MIT by their authors, and the
+Lean abbreviation table is Apache-2.0 from
+[vscode-lean4](https://github.com/leanprover/vscode-lean4), see the `NOTICE`
+files. Built with [ratatui](https://github.com/ratatui/ratatui),
 [crossterm](https://github.com/crossterm-rs/crossterm),
 [ropey](https://github.com/cessen/ropey),
 [syntect](https://github.com/trishume/syntect),

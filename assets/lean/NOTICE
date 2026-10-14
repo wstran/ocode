@@ -1,0 +1,11 @@
+Lean unicode abbreviations
+==========================
+
+abbreviations.json is the table of Lean's unicode input (`\forall` -> `∀`),
+redistributed unmodified from the official Lean 4 VS Code extension:
+
+  https://github.com/leanprover/vscode-lean4
+  lean4-unicode-input/src/abbreviations.json, commit dead846a035f42dc13beb7619ac779538e6ddf6e
+
+It is licensed under the Apache License, Version 2.0, a copy of which is in
+LICENSE in this directory. Copyright remains with its authors.

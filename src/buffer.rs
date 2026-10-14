@@ -5,6 +5,8 @@ use std::time::SystemTime;
 use anyhow::{Context, Result};
 use ropey::Rope;
 
+use crate::abbrev::Tracked;
+
 use crate::highlight::HlCache;
 
 const INDENT: &str = "    ";
@@ -97,6 +99,9 @@ pub struct Buffer {
     /// `true` when the file changed on disk while this buffer had unsaved edits
     /// (a conflict the user must resolve with reload or overwrite).
     pub disk_changed: bool,
+
+    /// A Lean abbreviation being typed (`\forall` on its way to `∀`).
+    pub abbrev: Option<Tracked>,
 }
 
 impl Buffer {
@@ -134,6 +139,7 @@ impl Buffer {
             last_edit_pos: None,
             last_insert_char: None,
             anchor: None,
+            abbrev: None,
         })
     }
 
@@ -327,6 +333,9 @@ impl Buffer {
         // selection behind.
         self.anchor = snap.anchor.map(|a| a.min(self.rope.len_chars()));
 
+        // The restored text predates any abbreviation being typed now.
+        self.abbrev = None;
+
         self.hl.invalidate(0);
 
         self.refresh_modified();
@@ -453,6 +462,8 @@ impl Buffer {
 
         self.anchor = None;
 
+        self.abbrev = None;
+
         self.clamp_cursor();
 
         self.hl.invalidate(0);
@@ -526,6 +537,44 @@ impl Buffer {
         self.refresh_modified();
 
         self.mark_edit(Some(ch));
+    }
+
+    /// Replace a char range with `text` as one undo step, leaving the cursor at
+    /// char index `cursor` of the result. An undo brings the old text back.
+    pub fn replace_chars(&mut self, range: std::ops::Range<usize>, text: &str, cursor: usize) {
+        let line = self.rope.char_to_line(range.start);
+
+        self.record(EditKind::Other, range.start, true);
+
+        self.rope.remove(range.clone());
+
+        self.rope.insert(range.start, text);
+
+        // A selection made before the edit would now point at shifted text.
+        self.anchor = None;
+
+        self.move_to_char(cursor);
+
+        self.hl.invalidate(line);
+
+        self.refresh_modified();
+
+        self.mark_edit(None);
+    }
+
+    /// Lean files get the unicode input of Lean's own editors.
+    pub fn is_lean(&self) -> bool {
+        self.hl.syntax_name() == "Lean"
+    }
+
+    /// Whether the text still reads `\` and then the abbreviation where it was
+    /// typed, so replacing it cannot clobber anything else.
+    pub fn holds_abbreviation(&self, tracked: &Tracked) -> bool {
+        let end = tracked.end();
+
+        end <= self.rope.len_chars()
+            && self.rope.char(tracked.start) == '\\'
+            && self.rope.slice(tracked.start + 1..end) == tracked.text.as_str()
     }
 
     /// Insert a block of text at the cursor (used by paste), replacing the
@@ -1373,6 +1422,7 @@ mod tests {
             anchor: None,
             disk_mtime: None,
             disk_changed: false,
+            abbrev: None,
         }
     }
 

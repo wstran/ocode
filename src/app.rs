@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
+use crate::abbrev;
 use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
 use crate::media::{self, Loaded, Media};
@@ -223,6 +224,8 @@ impl App {
             return;
         }
 
+        self.settle_abbreviation(&key);
+
         let is_quit_key = ctrl && key.code == KeyCode::Char('q');
 
         if !is_quit_key {
@@ -290,6 +293,36 @@ impl App {
         }
     }
 
+    /// A Lean abbreviation is settled by anything that is not part of typing
+    /// it, before that thing runs, so Enter, a paste or a save see `∀` rather
+    /// than `\forall`. Undo drops it instead, as it is about to bring back text
+    /// from before the abbreviation, and Esc is left to keep it as typed.
+    fn settle_abbreviation(&mut self, key: &KeyEvent) {
+        let typing = self.focus == Focus::Editor && self.search.is_none();
+
+        let Some(buf) = self.buffer.as_mut() else {
+            return;
+        };
+
+        if buf.abbrev.is_none() {
+            return;
+        }
+
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        let plain = !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+
+        match key.code {
+            KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Tab if typing && plain => {}
+
+            KeyCode::Esc => {}
+
+            KeyCode::Char('z' | 'Z' | 'y') if ctrl => buf.abbrev = None,
+
+            _ => abbrev::commit_pending(buf),
+        }
+    }
+
     /// True only on the empty welcome screen — no file is open, text or media.
     fn on_welcome(&self) -> bool {
         self.buffer.is_none() && self.media.is_none()
@@ -297,6 +330,12 @@ impl App {
 
     fn handle_escape(&mut self) {
         if let Some(buf) = self.buffer.as_mut() {
+            // A Lean abbreviation being typed is the innermost layer: Esc keeps
+            // it as typed instead of replacing it.
+            if abbrev::cancel(buf) {
+                return;
+            }
+
             if buf.selection().is_some() {
                 buf.clear_selection();
 
@@ -419,6 +458,14 @@ impl App {
         self.overwrite_confirm = false;
 
         self.esc_confirm = false;
+
+        // A click moves the caret off a Lean abbreviation being typed, which
+        // settles it first, as any other keystroke would.
+        if matches!(ev.kind, MouseEventKind::Down(_)) {
+            if let Some(buf) = self.buffer.as_mut() {
+                abbrev::commit_pending(buf);
+            }
+        }
 
         let at = (ev.column, ev.row);
 
@@ -672,7 +719,9 @@ impl App {
 
             KeyCode::Backspace if nav => buf.delete_word_left(),
 
-            KeyCode::Backspace => buf.backspace(),
+            KeyCode::Backspace => {
+                if buf.is_lean() { abbrev::backspace(buf) } else { buf.backspace() }
+            }
 
             KeyCode::Delete if nav => buf.delete_word_right(),
 
@@ -724,12 +773,19 @@ impl App {
             // Shift+Tab outdents the current line (Tab below indents).
             KeyCode::BackTab => buf.outdent(),
 
-            // Always indents, sidebar open or not, to match Shift+Tab and the
-            // documented behaviour. Ctrl+B is the way to reach the sidebar; Tab
-            // going there would swallow indentation for as long as it is up.
-            KeyCode::Tab => buf.indent(),
+            // Finishes a Lean abbreviation being typed; otherwise always indents,
+            // sidebar open or not, to match Shift+Tab and the documented
+            // behaviour. Ctrl+B is the way to reach the sidebar; Tab going there
+            // would swallow indentation for as long as it is up.
+            KeyCode::Tab => {
+                if !abbrev::complete(buf) {
+                    buf.indent();
+                }
+            }
 
-            KeyCode::Char(c) if !ctrl && !alt => buf.insert_char(c),
+            KeyCode::Char(c) if !ctrl && !alt => {
+                if buf.is_lean() { abbrev::type_char(buf, c) } else { buf.insert_char(c) }
+            }
 
             _ => {}
         }
@@ -2718,5 +2774,97 @@ mod tests {
         app.on_key(ctrl(KeyCode::Char('y')));
 
         assert_eq!(app.buffer.as_ref().unwrap().rope.to_string(), "hi");
+    }
+
+    fn lean_app(name: &str, text: &str) -> App {
+        let path = std::env::temp_dir().join(format!("ocode_app_{name}.lean"));
+
+        fs::write(&path, text).unwrap();
+
+        let mut app = App::new(path, false).unwrap();
+
+        app.picker = None;
+
+        app
+    }
+
+    fn type_keys(app: &mut App, text: &str) {
+        for ch in text.chars() {
+            app.on_key(plain(KeyCode::Char(ch)));
+        }
+    }
+
+    fn text_of(app: &App) -> String {
+        app.buffer.as_ref().unwrap().rope.to_string()
+    }
+
+    /// Lean's unicode input, through the same key path as real typing.
+    #[test]
+    fn lean_abbreviations_are_replaced_as_they_are_typed() {
+        let mut app = lean_app("abbrev_keys", "");
+
+        type_keys(&mut app, "theorem t : \\forall n, n = n \\and \\top");
+
+        assert_eq!(text_of(&app), "theorem t : ∀ n, n = n ∧ ⊤");
+    }
+
+    /// Anything that is not part of typing an abbreviation settles it before it
+    /// runs, except Esc, which keeps it as typed, and undo, which drops it.
+    #[test]
+    fn other_keys_settle_an_abbreviation_first() {
+        let mut app = lean_app("abbrev_enter", "");
+
+        type_keys(&mut app, "\\to");
+
+        app.on_key(plain(KeyCode::Enter));
+
+        assert_eq!(text_of(&app), "→\n", "Enter replaced it, then broke the line");
+
+        let mut app = lean_app("abbrev_tab", "");
+
+        type_keys(&mut app, "\\al");
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(text_of(&app), "∀", "Tab replaced it instead of indenting");
+
+        let mut app = lean_app("abbrev_click", "");
+
+        type_keys(&mut app, "\\to");
+
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0));
+
+        assert_eq!(text_of(&app), "→", "a click replaced it");
+
+        let mut app = lean_app("abbrev_esc", "");
+
+        type_keys(&mut app, "\\t");
+
+        app.on_key(plain(KeyCode::Esc));
+
+        type_keys(&mut app, " ");
+
+        assert_eq!(text_of(&app), "\\t ", "Esc kept it as typed");
+
+        assert!(!app.esc_confirm, "and did not arm the quit");
+
+        let mut app = lean_app("abbrev_undo", "");
+
+        type_keys(&mut app, "x \\to");
+
+        app.on_key(ctrl(KeyCode::Char('z')));
+
+        assert_eq!(text_of(&app), "x \\", "undo took back the typing, not a replacement");
+
+        assert!(app.buffer.as_ref().unwrap().abbrev.is_none());
+    }
+
+    #[test]
+    fn other_languages_take_a_backslash_literally() {
+        let mut app = app_with("abbrev_plain", "");
+
+        type_keys(&mut app, "\\forall \\a ");
+
+        assert_eq!(text_of(&app), "\\forall \\a ");
     }
 }

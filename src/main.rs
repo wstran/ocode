@@ -1,3 +1,4 @@
+mod abbrev;
 mod app;
 mod buffer;
 mod comment;

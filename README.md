@@ -75,6 +75,7 @@ application. Hold `Shift` with any motion to select instead of move.
 | `Ctrl+F` | Find |
 | `Ctrl+B` | File tree: show, focus, hide |
 | `Ctrl+R` | Reload from disk |
+| `Ctrl+G` | Lean: show or hide the goals panel |
 | `Ctrl+Q` | Quit |
 | `Esc` | Step back one layer: clear the selection, else hide the tree, else open it to pick another file. Again with nothing left to do quits |
 
@@ -115,6 +116,7 @@ afterwards so you can press again, and undo in one step.
 | `Shift`+click | Extend the selection from the caret to the click |
 | Wheel | Scroll the view, leaving the caret and any selection alone |
 | Wheel in a binary or metadata view | Scroll the inspector |
+| Wheel over the Lean panel | Scroll the goals and messages |
 | Click a file in the tree | First click selects it, a second click opens it |
 | Click a folder in the tree | Expand or collapse, on the first click |
 
@@ -200,6 +202,13 @@ starts (a new line, or after `by`, `;`, `<;>`, `·` or `=>`), never as the
 hypothesis names they often share, like `left` and `right`. Nested and doc
 comments, char literals, raw and interpolated strings and `«quoted»` names read
 the way Lean reads them.
+
+**Goals.** Beside a Lean file sits Lean's own view of the caret, the way the
+official editors show it: the goals of the proof there, each hypothesis and the
+`⊢` target in Lean's colours, `No goals` once the proof is done, the type a
+term is expected to have, and the full text of any message on the caret's line.
+Step through a proof one tactic at a time and watch the goals change. `Ctrl+G`
+hides or shows the panel, which needs at least 72 columns beside the file tree.
 
 **Errors as you type.** With Lean installed, `ocode` runs Lean's own server
 for the open file, the same one the official editors use. A line with an error

@@ -141,6 +141,19 @@ pub struct App {
     /// The Lean file the server could not be started for, so it is not tried
     /// again on every turn of the loop.
     lean_failed: Option<PathBuf>,
+
+    /// Whether the goals panel is shown beside a Lean file (Ctrl+G).
+    pub infoview: bool,
+
+    /// Where the goals panel was last drawn, for the mouse wheel.
+    pub infoview_area: Option<(u16, u16, u16, u16)>,
+
+    /// Lines of the goals panel scrolled past. A long context in Mathlib
+    /// pushes the `⊢` target below the fold.
+    pub infoview_scroll: usize,
+
+    /// The caret the panel was scrolled for; moving it starts from the top.
+    infoview_caret: Option<usize>,
 }
 
 impl App {
@@ -214,6 +227,10 @@ impl App {
             clip_internal: String::new(),
             lean: None,
             lean_failed: None,
+            infoview: true,
+            infoview_area: None,
+            infoview_scroll: 0,
+            infoview_caret: None,
         })
     }
 
@@ -275,6 +292,8 @@ impl App {
                 KeyCode::Char('a') => return self.select_all(),
 
                 KeyCode::Char('r') => return self.reload(),
+
+                KeyCode::Char('g') => return self.toggle_infoview(),
 
                 // Toggle comment. A legacy terminal sends Ctrl+/ as byte 0x1F,
                 // which crossterm cannot tell from Ctrl+7; a terminal speaking
@@ -483,7 +502,21 @@ impl App {
             self.on_tree_mouse(ev);
         } else if in_area(self.editor_area, at) {
             self.on_editor_mouse(ev);
+        } else if in_area(self.infoview_area, at) {
+            match ev.kind {
+                MouseEventKind::ScrollUp => self.scroll_infoview(-EDITOR_SCROLL_STEP),
+
+                MouseEventKind::ScrollDown => self.scroll_infoview(EDITOR_SCROLL_STEP),
+
+                _ => {}
+            }
         }
+    }
+
+    /// Scroll the goals panel. The renderer clamps the far end, since only it
+    /// knows how long the panel's text is at its width.
+    fn scroll_infoview(&mut self, delta: isize) {
+        self.infoview_scroll = self.infoview_scroll.saturating_add_signed(delta);
     }
 
     fn on_tree_mouse(&mut self, ev: MouseEvent) {
@@ -1080,6 +1113,14 @@ impl App {
             // flash an error for every letter of it.
             if buf.abbrev.is_none() {
                 session.sync(&buf.rope);
+
+                session.ask_goals(buf.char_idx());
+            }
+
+            if self.infoview_caret != Some(buf.char_idx()) {
+                self.infoview_caret = Some(buf.char_idx());
+
+                self.infoview_scroll = 0;
             }
         }
 
@@ -1126,6 +1167,11 @@ impl App {
         if let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) {
             session.open(path, &buf.rope);
         }
+    }
+
+    /// Show or hide the goals panel beside a Lean file.
+    fn toggle_infoview(&mut self) {
+        self.infoview = !self.infoview;
     }
 
     /// Stop Lean's server, if one is running. Quitting calls this so no server
@@ -3012,5 +3058,130 @@ mod tests {
         app.stop_lean();
 
         assert!(app.lean.is_none());
+    }
+
+    #[test]
+    fn ctrl_g_shows_and_hides_the_goals_panel() {
+        let mut app = lean_app("infoview_toggle", "");
+
+        assert!(app.infoview, "shown by default");
+
+        app.on_key(ctrl(KeyCode::Char('g')));
+
+        assert!(!app.infoview);
+
+        app.on_key(ctrl(KeyCode::Char('g')));
+
+        assert!(app.infoview);
+    }
+
+    /// Run the loop until Lean has answered about the caret where it is now.
+    fn settle_goals(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        loop {
+            app.service_lean();
+
+            if app.lean.as_ref().is_some_and(|s| !s.busy() && s.goals().is_some()) {
+                return;
+            }
+
+            assert!(Instant::now() < deadline, "no answer from Lean; status: {}", app.status);
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn screen(app: &mut App, width: u16, height: u16) -> String {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+
+        terminal.draw(|frame| crate::ui::render(frame, app)).unwrap();
+
+        let buf = terminal.backend().buffer().clone();
+
+        (0..height)
+            .map(|y| (0..width).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A long context pushes the `⊢` target below the panel's edge; the edge
+    /// says so, and the wheel brings it up.
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_long_goals_scroll_into_view() {
+        let hypotheses: String = (1..=30).map(|i| format!("(h{i} : {i} = {i}) ")).collect();
+
+        let mut app = lean_app("server_scroll", &format!("example {hypotheses}: True := by\n  trivial\n"));
+
+        app.buffer.as_mut().unwrap().move_to_pos(1, 2);
+
+        settle_goals(&mut app);
+
+        let top = screen(&mut app, 140, 20);
+
+        assert!(top.contains("h1 : 1 = 1") && !top.contains("⊢ True"), "{top}");
+
+        assert!(top.contains("more"), "the edge says there is more: {top}");
+
+        let (x, y, _, _) = app.infoview_area.expect("the panel is drawn");
+
+        for _ in 0..20 {
+            app.on_mouse(mouse(MouseEventKind::ScrollDown, x + 2, y + 2));
+        }
+
+        let bottom = screen(&mut app, 140, 20);
+
+        assert!(bottom.contains("⊢ True") && bottom.contains("↑"), "{bottom}");
+
+        app.stop_lean();
+    }
+
+    /// The goals panel against the real server: the goal inside a proof, no
+    /// goals at its end, the expected type of a term, and an error in full.
+    /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_goals_fill_the_panel() {
+        let source = concat!(
+            "theorem and_swap (p q : Prop) (h : p ∧ q) : q ∧ p := by\n",
+            "  obtain ⟨hp, hq⟩ := h\n",
+            "  exact ⟨hq, hp⟩\n",
+            "def double (n : Nat) : Nat := n + n\n",
+            "example : 2 + 2 = 5 := by decide\n",
+        );
+
+        let mut app = lean_app("server_goals", source);
+
+        let screen_at = |app: &mut App, line: usize, col: usize| -> String {
+            app.buffer.as_mut().unwrap().move_to_pos(line, col);
+
+            settle_goals(app);
+
+            screen(app, 140, 20)
+        };
+
+        let inside = screen_at(&mut app, 2, 2);
+
+        assert!(inside.contains("Goal") && inside.contains("hp : p") && inside.contains("⊢ q ∧ p"), "{inside}");
+
+        let done = screen_at(&mut app, 2, 16);
+
+        assert!(done.contains("No goals"), "{done}");
+
+        let term = screen_at(&mut app, 3, 30);
+
+        assert!(term.contains("Expected type") && term.contains("⊢ Nat"), "{term}");
+
+        let failing = screen_at(&mut app, 4, 27);
+
+        assert!(failing.contains("Messages") && failing.contains("error"), "{failing}");
+
+        assert!(failing.contains("proved that the proposition"), "the message in full: {failing}");
+
+        app.stop_lean();
     }
 }

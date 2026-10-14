@@ -1,6 +1,6 @@
-//! Lean's language server, for the errors of the open Lean file. It starts only
-//! when a Lean file is open and Lean is installed, and stops when that file is
-//! closed, so every other file costs nothing.
+//! Lean's language server, for the errors and goals of the open Lean file. It
+//! starts only when a Lean file is open and Lean is installed, and stops when
+//! that file is closed, so every other file costs nothing.
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -40,6 +40,30 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+/// What Lean says holds at the caret.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Goals {
+    /// The tactic state: `None` outside a tactic proof, empty once it is done.
+    pub tactic: Option<Vec<String>>,
+
+    /// The type the term at the caret is expected to have.
+    pub expected: Option<String>,
+}
+
+/// The two questions sent for one caret position, and the answers so far.
+struct Asking {
+    tactic_id: i64,
+
+    term_id: i64,
+
+    tactic: Option<Option<Vec<String>>>,
+
+    expected: Option<Option<String>>,
+
+    /// Either question came back as an error.
+    failed: bool,
+}
+
 /// Why there is no session for a Lean file.
 #[derive(Debug)]
 pub enum Unavailable {
@@ -61,6 +85,18 @@ pub struct Session {
 
     /// When the server was last handed new text.
     last_sent: Option<Instant>,
+
+    /// The question about the caret in flight, if any.
+    asking: Option<Asking>,
+
+    /// What was last asked about: caret, version, and how many times the file
+    /// had finished being checked, since goals can change when it does.
+    asked: Option<(usize, i64, u64)>,
+
+    /// Times the open file has finished being checked.
+    checked: u64,
+
+    goals: Option<Goals>,
 }
 
 struct Doc {
@@ -108,7 +144,17 @@ impl Session {
             }),
         );
 
-        Ok(Self { server, root, initializing: Some(id), doc: None, last_sent: None })
+        Ok(Self {
+            server,
+            root,
+            initializing: Some(id),
+            doc: None,
+            last_sent: None,
+            asking: None,
+            asked: None,
+            checked: 0,
+            goals: None,
+        })
     }
 
     /// The project the server was started for.
@@ -124,6 +170,13 @@ impl Session {
     /// Hand the server `path` with its text, closing whatever was open before.
     pub fn open(&mut self, path: &Path, text: &Rope) {
         self.close();
+
+        // Answers still on their way are about the old file.
+        self.asking = None;
+
+        self.asked = None;
+
+        self.goals = None;
 
         self.doc = Some(Doc {
             path: path.to_path_buf(),
@@ -252,9 +305,11 @@ impl Session {
                     self.server.notify("initialized", json!({}));
 
                     self.send_open();
+
+                    return false;
                 }
 
-                false
+                self.take_answer(id.as_i64(), &message)
             }
 
             (None, Some("textDocument/publishDiagnostics")) => self.take_diagnostics(&message["params"]),
@@ -299,6 +354,84 @@ impl Session {
         true
     }
 
+    /// An answer to one of the questions about the caret. An error, as when
+    /// the text changed before Lean got to it, keeps the goals shown before
+    /// rather than blanking the panel; the change itself asks again.
+    fn take_answer(&mut self, id: Option<i64>, message: &Value) -> bool {
+        let Some(asking) = self.asking.as_mut() else {
+            return false;
+        };
+
+        let result = &message["result"];
+
+        if message.get("error").is_some() && (id == Some(asking.tactic_id) || id == Some(asking.term_id)) {
+            asking.failed = true;
+        }
+
+        if id == Some(asking.tactic_id) {
+            asking.tactic = Some(tactic_goals(result));
+        } else if id == Some(asking.term_id) {
+            asking.expected = Some(result["goal"].as_str().map(str::to_string));
+        } else {
+            return false;
+        }
+
+        let (Some(tactic), Some(expected)) = (&asking.tactic, &asking.expected) else {
+            return false;
+        };
+
+        let goals = Goals { tactic: tactic.clone(), expected: expected.clone() };
+
+        let failed = asking.failed;
+
+        self.asking = None;
+
+        if failed {
+            return false;
+        }
+
+        let changed = self.goals.as_ref() != Some(&goals);
+
+        self.goals = Some(goals);
+
+        changed
+    }
+
+    /// Ask what holds at char `at`, unless that is already known or asked.
+    /// One question is in flight at a time, so a caret that keeps moving gets
+    /// its answer for where it stops rather than for every step on the way.
+    pub fn ask_goals(&mut self, at: usize) {
+        let Some(doc) = self.doc.as_ref().filter(|doc| doc.opened) else {
+            return;
+        };
+
+        let key = (at, doc.version, self.checked);
+
+        if self.asking.is_some() || self.asked == Some(key) {
+            return;
+        }
+
+        let (line, character) = position(&doc.synced, at.min(doc.synced.len_chars()));
+
+        let params = json!({
+            "textDocument": { "uri": doc.uri },
+            "position": { "line": line, "character": character },
+        });
+
+        let tactic_id = self.server.request("$/lean/plainGoal", params.clone());
+
+        let term_id = self.server.request("$/lean/plainTermGoal", params);
+
+        self.asking = Some(Asking { tactic_id, term_id, tactic: None, expected: None, failed: false });
+
+        self.asked = Some(key);
+    }
+
+    /// The last answer about the caret.
+    pub fn goals(&self) -> Option<&Goals> {
+        self.goals.as_ref()
+    }
+
     fn take_progress(&mut self, params: &Value) -> bool {
         let Some(doc) = self.current_doc(params, &params["textDocument"]["uri"]) else {
             return false;
@@ -323,7 +456,13 @@ impl Session {
             return false;
         }
 
+        let finished = processing.is_empty();
+
         doc.processing = processing;
+
+        if finished {
+            self.checked += 1;
+        }
 
         true
     }
@@ -343,6 +482,7 @@ impl Session {
     /// since results are coming.
     pub fn busy(&self) -> bool {
         self.initializing.is_some()
+            || self.asking.is_some()
             || self.doc.as_ref().is_some_and(|doc| !doc.processing.is_empty())
             || self.last_sent.is_some_and(|at| at.elapsed() < ANSWER_WINDOW)
     }
@@ -367,6 +507,14 @@ impl Session {
 
         self.server.stop();
     }
+}
+
+/// The tactic state in an answer to `$/lean/plainGoal`: `None` when the caret
+/// is not in a tactic proof, an empty list once the proof is done.
+fn tactic_goals(result: &Value) -> Option<Vec<String>> {
+    let goals = result.get("goals")?.as_array()?;
+
+    Some(goals.iter().filter_map(Value::as_str).map(str::to_string).collect())
 }
 
 /// Where a position ends up after `replaced` is swapped for `inserted_len`
@@ -596,6 +744,162 @@ mod tests {
         }
 
         assert_eq!(edit_between(&Rope::from_str("same"), &Rope::from_str("same")), None);
+    }
+
+    /// A session whose server swallows whatever it is sent, so the messages a
+    /// real server would answer with can be handed in by the test.
+    #[cfg(unix)]
+    fn silent_session(text: &str) -> Session {
+        let server = Server::spawn(Path::new("/bin/sh"), &["-c", "cat > /dev/null"], Path::new("/")).unwrap();
+
+        let mut session = Session {
+            server,
+            root: PathBuf::from("/"),
+            initializing: None,
+            doc: None,
+            last_sent: None,
+            asking: None,
+            asked: None,
+            checked: 0,
+            goals: None,
+        };
+
+        session.open(Path::new("/nonexistent/Test.lean"), &Rope::from_str(text));
+
+        session
+    }
+
+    #[cfg(unix)]
+    fn answer(session: &mut Session, id: i64, result: Value) -> bool {
+        session.handle(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    /// Two questions go out per caret position, their answers may come back
+    /// in either order, and only the pair together replaces the goals.
+    #[cfg(unix)]
+    #[test]
+    fn goals_arrive_as_a_pair_in_any_order() {
+        let mut session = silent_session("theorem t : True := by\n  trivial\n");
+
+        session.ask_goals(25);
+
+        let (tactic, term) = {
+            let asking = session.asking.as_ref().expect("asked");
+
+            (asking.tactic_id, asking.term_id)
+        };
+
+        session.ask_goals(26);
+
+        assert_eq!(session.asking.as_ref().map(|a| a.tactic_id), Some(tactic), "one question in flight at a time");
+
+        assert!(!answer(&mut session, term, Value::Null), "half an answer changes nothing");
+
+        assert!(session.goals().is_none());
+
+        assert!(answer(&mut session, tactic, json!({ "goals": ["⊢ True"] })));
+
+        assert_eq!(session.goals().and_then(|g| g.tactic.clone()), Some(vec!["⊢ True".to_string()]));
+
+        assert!(session.asking.is_none(), "the pair is complete, so the next caret can be asked about");
+    }
+
+    /// An error answer, as when the text moved on, keeps the goals on screen
+    /// instead of blanking the panel.
+    #[cfg(unix)]
+    #[test]
+    fn an_error_answer_keeps_the_goals_shown() {
+        let mut session = silent_session("theorem t : True := by\n  trivial\n");
+
+        session.ask_goals(25);
+
+        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+
+        answer(&mut session, tactic, json!({ "goals": ["⊢ True"] }));
+
+        answer(&mut session, term, Value::Null);
+
+        session.ask_goals(30);
+
+        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+
+        session.handle(json!({ "jsonrpc": "2.0", "id": tactic, "error": { "code": -32801, "message": "content modified" } }));
+
+        assert!(!answer(&mut session, term, Value::Null));
+
+        assert_eq!(session.goals().and_then(|g| g.tactic.clone()), Some(vec!["⊢ True".to_string()]));
+
+        assert!(session.asking.is_none(), "and the next change can ask again");
+    }
+
+    /// Reports about an older version are dropped, and a finished check makes
+    /// the same caret worth asking about again.
+    #[cfg(unix)]
+    #[test]
+    fn stale_reports_are_dropped_and_a_finished_check_asks_again() {
+        let mut session = silent_session("example : 1 = 2 := by rfl\n");
+
+        session.sync(&Rope::from_str("example : 1 = 2 := by rfl\n-- edited\n"));
+
+        let stale = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/publishDiagnostics",
+            "params": {
+                "uri": "file:///nonexistent/Test.lean",
+                "version": 1,
+                "diagnostics": [{
+                    "range": { "start": { "line": 0, "character": 22 }, "end": { "line": 0, "character": 25 } },
+                    "severity": 1,
+                    "message": "old",
+                }],
+            },
+        });
+
+        assert!(!session.handle(stale), "version 1 is gone");
+
+        assert!(session.diagnostics().is_empty());
+
+        session.ask_goals(3);
+
+        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+
+        answer(&mut session, tactic, Value::Null);
+
+        answer(&mut session, term, Value::Null);
+
+        session.ask_goals(3);
+
+        assert!(session.asking.is_none(), "the same question is not asked twice");
+
+        let progress = |processing: Value| {
+            json!({
+                "jsonrpc": "2.0",
+                "method": "$/lean/fileProgress",
+                "params": { "textDocument": { "uri": "file:///nonexistent/Test.lean", "version": 2 }, "processing": processing },
+            })
+        };
+
+        session.handle(progress(json!([{ "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 1, "character": 0 } } }])));
+
+        assert!(session.checking() && session.is_processing(1));
+
+        session.handle(progress(json!([])));
+
+        session.ask_goals(3);
+
+        assert!(session.asking.is_some(), "a finished check asks again");
+    }
+
+    /// The three shapes of answer the real server gives to `plainGoal`.
+    #[test]
+    fn tactic_goals_read_every_answer() {
+        assert_eq!(tactic_goals(&Value::Null), None, "outside a tactic proof");
+
+        assert_eq!(tactic_goals(&json!({ "goals": [], "rendered": "no goals" })), Some(vec![]), "a finished proof");
+
+        let two = json!({ "goals": ["case zero\n⊢ 0 = 0", "case succ\nn✝ : Nat\n⊢ n✝ + 1 = n✝ + 1"] });
+
+        assert_eq!(tactic_goals(&two).map(|g| g.len()), Some(2));
     }
 
     /// Marks follow the code they point at through an edit made before the

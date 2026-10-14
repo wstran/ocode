@@ -90,9 +90,243 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         main
     };
 
+    let editor_area = match infoview_width(app, editor_area.width) {
+        Some(width) => {
+            let cols = Layout::horizontal([Constraint::Min(0), Constraint::Length(width)]).split(editor_area);
+
+            render_infoview(frame, app, cols[1], pal);
+
+            cols[0]
+        }
+
+        None => {
+            app.infoview_area = None;
+
+            editor_area
+        }
+    };
+
     render_editor(frame, app, editor_area, pal);
 
     render_status(frame, app, status_area, pal);
+}
+
+/// The goals panel's width, when it is shown: beside a Lean file whose server
+/// runs, unless the code would be left too narrow to work in.
+fn infoview_width(app: &App, available: u16) -> Option<u16> {
+    let lean_file = app.media.is_none() && app.buffer.as_ref().is_some_and(|b| b.is_lean());
+
+    (app.infoview && lean_file && app.lean.is_some() && available >= 72)
+        .then(|| (available * 2 / 5).clamp(30, 64))
+}
+
+/// Lean's view of the caret: the goals of the proof there, the type a term is
+/// expected to have, and the full text of the messages on the caret's line.
+/// The wheel scrolls it, and the bottom edge says when there is more.
+fn render_infoview(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
+    let dim = Style::default().fg(pal.dim);
+
+    let mut block = Block::default().borders(Borders::ALL).border_style(dim).title(" Lean ");
+
+    let inner = block.inner(area);
+
+    app.infoview_area = Some((area.x, area.y, area.width, area.height));
+
+    if inner.width < 4 || inner.height == 0 {
+        frame.render_widget(block, area);
+
+        return;
+    }
+
+    // One column of margin on each side.
+    let text_area = Rect { x: inner.x + 1, width: inner.width - 2, ..inner };
+
+    let lines = infoview_lines(app, text_area.width as usize, pal);
+
+    let height = text_area.height as usize;
+
+    app.infoview_scroll = app.infoview_scroll.min(lines.len().saturating_sub(height));
+
+    let below = lines.len().saturating_sub(app.infoview_scroll + height);
+
+    let marker = match (app.infoview_scroll > 0, below > 0) {
+        (true, true) => format!(" ↑ ↓ {below} more "),
+
+        (false, true) => format!(" ↓ {below} more "),
+
+        (true, false) => " ↑ ".to_string(),
+
+        (false, false) => String::new(),
+    };
+
+    if !marker.is_empty() {
+        block = block.title_bottom(Line::styled(marker, dim));
+    }
+
+    frame.render_widget(block, area);
+
+    let scroll = u16::try_from(app.infoview_scroll).unwrap_or(u16::MAX);
+
+    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), text_area);
+}
+
+fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>> {
+    let heading = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+
+    let dim = Style::default().fg(pal.dim);
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+
+    let (Some(session), Some(buf)) = (app.lean.as_ref(), app.buffer.as_ref()) else {
+        return out;
+    };
+
+    if session.starting() {
+        out.push(Line::styled("Lean is starting…", dim));
+
+        if let Some(log) = session.last_log() {
+            out.extend(wrap(&[(dim, log)], width));
+        }
+
+        return out;
+    }
+
+    // Goals read best in Lean's own colours: hypothesis names, types, `⊢`.
+    let lean_code = |code: &str| -> Vec<Line<'static>> {
+        app.highlighter
+            .highlight_block(code, "lean", app.highlighter.current_theme())
+            .iter()
+            .flat_map(|spans| wrap(spans, width))
+            .collect()
+    };
+
+    let goals = session.goals();
+
+    match goals.and_then(|g| g.tactic.as_ref()) {
+        Some(list) if list.is_empty() => {
+            out.push(Line::styled("Goals", heading));
+
+            out.push(Line::styled("No goals", Style::default().fg(OK)));
+        }
+
+        Some(list) => {
+            let title = if list.len() == 1 { "Goal".to_string() } else { format!("Goals ({})", list.len()) };
+
+            out.push(Line::styled(title, heading));
+
+            for (i, goal) in list.iter().enumerate() {
+                if i > 0 {
+                    out.push(Line::default());
+                }
+
+                out.extend(lean_code(goal));
+            }
+        }
+
+        None => {}
+    }
+
+    if let Some(expected) = goals.and_then(|g| g.expected.as_ref()) {
+        if !out.is_empty() {
+            out.push(Line::default());
+        }
+
+        out.push(Line::styled("Expected type", heading));
+
+        out.extend(lean_code(expected));
+    }
+
+    let len = buf.rope.len_chars();
+
+    let here: Vec<&Diagnostic> = session
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            let first = buf.rope.char_to_line(d.start.min(len));
+
+            let last = buf.rope.char_to_line(d.end.min(len));
+
+            (first..=last).contains(&buf.cursor_line)
+        })
+        .collect();
+
+    if !here.is_empty() {
+        if !out.is_empty() {
+            out.push(Line::default());
+        }
+
+        out.push(Line::styled("Messages", heading));
+
+        for d in here {
+            let label = match d.severity {
+                Severity::Error => "error",
+
+                Severity::Warning => "warning",
+
+                Severity::Information => "info",
+
+                Severity::Hint => "hint",
+            };
+
+            out.push(Line::styled(label, Style::default().fg(severity_colour(d.severity))));
+
+            for line in d.message.lines() {
+                out.extend(wrap(&[(Style::default().fg(pal.fg), line.to_string())], width));
+            }
+        }
+    }
+
+    if out.is_empty() {
+        let hint = if session.checking() { "Checking…" } else { "Put the caret in a proof to see its goals." };
+
+        out.extend(wrap(&[(dim, hint.to_string())], width));
+    }
+
+    out
+}
+
+/// Break styled text into lines at most `width` columns wide. A broken line
+/// carries on indented, so it reads as one.
+fn wrap(spans: &[(Style, String)], width: usize) -> Vec<Line<'static>> {
+    const INDENT: &str = "  ";
+
+    let width = width.max(INDENT.len() + 1);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    let mut current: Vec<Span<'static>> = Vec::new();
+
+    let mut col = 0;
+
+    for (style, text) in spans {
+        let mut chunk = String::new();
+
+        for ch in text.trim_end_matches(['\n', '\r']).chars() {
+            if col == width {
+                if !chunk.is_empty() {
+                    current.push(Span::styled(std::mem::take(&mut chunk), *style));
+                }
+
+                lines.push(Line::from(std::mem::take(&mut current)));
+
+                current.push(Span::raw(INDENT));
+
+                col = INDENT.len();
+            }
+
+            chunk.push(ch);
+
+            col += 1;
+        }
+
+        if !chunk.is_empty() {
+            current.push(Span::styled(chunk, *style));
+        }
+    }
+
+    lines.push(Line::from(current));
+
+    lines
 }
 
 fn render_picker(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
@@ -1058,6 +1292,21 @@ mod tests {
         terminal.draw(|frame| super::render(frame, app)).unwrap();
 
         format!("{}", terminal.backend())
+    }
+
+    #[test]
+    fn wrap_breaks_long_lines_and_indents_the_rest() {
+        use ratatui::style::Style;
+
+        let lines = super::wrap(&[(Style::default(), "abcdefghij".to_string())], 4);
+
+        let text: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+        assert_eq!(text, ["abcd", "  ef", "  gh", "  ij"]);
+
+        let short = super::wrap(&[(Style::default(), "⊢ p".to_string())], 40);
+
+        assert_eq!(short.len(), 1, "a line that fits stays whole");
     }
 
     /// A Lean abbreviation being typed is underlined in place, and the status

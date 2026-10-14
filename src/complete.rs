@@ -36,11 +36,25 @@ pub struct Popup {
     /// What the matches were worked out for: the word and how many names
     /// were offered, so they are not ranked again while neither changes.
     narrowed_for: Option<(String, usize)>,
+
+    /// Every offered name that fits the word, not only the best `KEEP`: the
+    /// names that fit a longer word are among them, so typing on searches
+    /// these instead of all of Mathlib's seventy-odd thousand again.
+    fits: Vec<usize>,
 }
 
 impl Popup {
     pub fn new(start: usize, explicit: bool) -> Self {
-        Self { start, matches: Vec::new(), selected: 0, scroll: 0, explicit, shown: false, narrowed_for: None }
+        Self {
+            start,
+            matches: Vec::new(),
+            selected: 0,
+            scroll: 0,
+            explicit,
+            shown: false,
+            narrowed_for: None,
+            fits: Vec::new(),
+        }
     }
 
     /// Whether there is anything to show for a word of `typed` chars.
@@ -74,11 +88,21 @@ impl Popup {
             return;
         }
 
+        let pool = match self.narrowed_for.take() {
+            Some((before, len)) if len == items.len() && typed.starts_with(&before) => std::mem::take(&mut self.fits),
+
+            _ => (0..items.len()).collect(),
+        };
+
         self.narrowed_for = Some(key);
 
         let kept = self.matches.get(self.selected).copied();
 
-        self.matches = rank(items, typed);
+        let (best, fits) = rank_among(items, typed, pool);
+
+        self.matches = best;
+
+        self.fits = fits;
 
         self.selected = kept.and_then(|k| self.matches.iter().position(|&m| m == k)).unwrap_or(0);
 
@@ -111,50 +135,75 @@ pub fn is_name_char(c: char) -> bool {
 /// come first, then those with a dotted part that does (`succ_p` finds
 /// `Nat.succ_pos`), then the same two ignoring case, then those that contain
 /// its letters in order. Within a tier, shorter names come first.
+#[cfg(test)]
 pub fn rank(items: &[Completion], typed: &str) -> Vec<usize> {
-    let lower = typed.to_lowercase();
+    rank_among(items, typed, (0..items.len()).collect()).0
+}
 
-    let mut scored: Vec<(u8, usize, &str, usize)> = items
-        .iter()
-        .enumerate()
-        .filter_map(|(i, item)| {
-            let label = item.label.as_str();
+/// Rank the names at `pool` against `typed`: the best `KEEP` in order, and
+/// every one that fits at all, to narrow from as the word grows.
+fn rank_among(items: &[Completion], typed: &str, pool: Vec<usize>) -> (Vec<usize>, Vec<usize>) {
+    let folded: String = typed.chars().map(fold).collect();
 
-            let tier = tier(label, typed, &lower)?;
+    let mut scored: Vec<(u8, usize, usize)> = pool
+        .into_iter()
+        .filter_map(|i| {
+            let label = items[i].label.as_str();
 
-            Some((tier, label.chars().count(), label, i))
+            Some((tier(label, typed, &folded)?, label.chars().count(), i))
         })
         .collect();
 
-    scored.sort_unstable();
+    let fits = scored.iter().map(|&(_, _, i)| i).collect();
 
-    scored.into_iter().take(KEEP).map(|(_, _, _, i)| i).collect()
+    let order = |a: &(u8, usize, usize), b: &(u8, usize, usize)| {
+        (a.0, a.1, items[a.2].label.as_str()).cmp(&(b.0, b.1, items[b.2].label.as_str()))
+    };
+
+    // Only the best few are shown; sorting the rest of thousands is waste.
+    if scored.len() > KEEP {
+        scored.select_nth_unstable_by(KEEP, order);
+
+        scored.truncate(KEEP);
+    }
+
+    scored.sort_unstable_by(order);
+
+    (scored.into_iter().map(|(_, _, i)| i).collect(), fits)
 }
 
-fn tier(label: &str, typed: &str, lower: &str) -> Option<u8> {
-    let part = |prefix: &str, text: &str| text.split('.').any(|p| p.starts_with(prefix));
+/// A char with case folded, without building a lowered copy of each name: this
+/// runs over every offered name on every keystroke.
+fn fold(c: char) -> char {
+    if c.is_ascii() { c.to_ascii_lowercase() } else { c.to_lowercase().next().unwrap_or(c) }
+}
 
+fn starts_folded(text: &str, folded: &str) -> bool {
+    let mut chars = text.chars().map(fold);
+
+    folded.chars().all(|f| chars.next() == Some(f))
+}
+
+fn tier(label: &str, typed: &str, folded: &str) -> Option<u8> {
     if label.starts_with(typed) {
         return Some(0);
     }
 
-    if part(typed, label) {
+    if label.split('.').any(|part| part.starts_with(typed)) {
         return Some(1);
     }
 
-    let label_lower = label.to_lowercase();
-
-    if label_lower.starts_with(lower) {
+    if starts_folded(label, folded) {
         return Some(2);
     }
 
-    if part(lower, &label_lower) {
+    if label.split('.').any(|part| starts_folded(part, folded)) {
         return Some(3);
     }
 
-    let mut letters = label_lower.chars();
+    let mut chars = label.chars().map(fold);
 
-    lower.chars().all(|c| letters.any(|l| l == c)).then_some(4)
+    folded.chars().all(|f| chars.any(|c| c == f)).then_some(4)
 }
 
 #[cfg(test)]
@@ -185,6 +234,23 @@ mod tests {
         assert_eq!(ranked(&labels, "spos"), ["sub_pos", "le_succ_pos", "Nat.succ_pos", "succ_pos_of_lt"]);
 
         assert!(ranked(&labels, "xyz").is_empty());
+    }
+
+    /// Typing on narrows from the last fits rather than from every name, and
+    /// must find exactly what ranking from scratch finds.
+    #[test]
+    fn narrowing_as_the_word_grows_matches_ranking_from_scratch() {
+        let labels: Vec<String> = (0..3000).map(|i| format!("Ns{}.add_{}_comm{}", i % 7, ["co", "cm", "x"][i % 3], i)).collect();
+
+        let items: Vec<Completion> = labels.iter().map(|l| Completion::named(l)).collect();
+
+        let mut popup = Popup::new(0, false);
+
+        for typed in ["a", "ad", "add", "add_", "add_c", "add_co", "add_com", "Add_Co", "zz"] {
+            popup.narrow(&items, typed);
+
+            assert_eq!(popup.matches, rank(&items, typed), "after typing {typed:?}");
+        }
     }
 
     #[test]

@@ -3082,7 +3082,7 @@ mod tests {
         loop {
             app.service_lean();
 
-            if app.lean.as_ref().is_some_and(|s| !s.busy() && s.goals().is_some()) {
+            if app.lean.as_ref().is_some_and(|s| !s.busy() && s.at_caret().is_some()) {
                 return;
             }
 
@@ -3141,7 +3141,8 @@ mod tests {
     }
 
     /// The goals panel against the real server: the goal inside a proof, no
-    /// goals at its end, the expected type of a term, and an error in full.
+    /// goals at its end, the expected type of a term, an error in full, and
+    /// what a name under the caret is.
     /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
     #[test]
     #[ignore = "needs a Lean toolchain"]
@@ -3181,6 +3182,11 @@ mod tests {
         assert!(failing.contains("Messages") && failing.contains("error"), "{failing}");
 
         assert!(failing.contains("proved that the proposition"), "the message in full: {failing}");
+
+        // On a name, its signature and documentation.
+        let name = screen_at(&mut app, 3, 16);
+
+        assert!(name.contains("Under the caret") && name.contains("Nat : Type"), "{name}");
 
         app.stop_lean();
     }

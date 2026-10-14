@@ -200,7 +200,7 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
             .collect()
     };
 
-    let goals = session.goals();
+    let goals = session.at_caret();
 
     match goals.and_then(|g| g.tactic.as_ref()) {
         Some(list) if list.is_empty() => {
@@ -276,6 +276,16 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
         }
     }
 
+    if let Some(hover) = goals.and_then(|g| g.hover.as_ref()) {
+        if !out.is_empty() {
+            out.push(Line::default());
+        }
+
+        out.push(Line::styled("Under the caret", heading));
+
+        out.extend(markdown_lines(hover, width, Style::default().fg(pal.fg), &lean_code));
+    }
+
     if out.is_empty() {
         let hint = if session.checking() { "Checking…" } else { "Put the caret in a proof to see its goals." };
 
@@ -283,6 +293,146 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
     }
 
     out
+}
+
+/// Lean's hover Markdown as panel lines: code in Lean's colours, prose wrapped
+/// at words, links reduced to their text and `***` rules to a blank line. Only
+/// what Lean's hovers use is understood; anything else shows as written.
+fn markdown_lines(
+    markdown: &str,
+    width: usize,
+    prose: Style,
+    lean_code: &dyn Fn(&str) -> Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let mut out: Vec<Line<'static>> = Vec::new();
+
+    let mut code: Option<String> = None;
+
+    for line in markdown.lines() {
+        let fence = line.trim_start().starts_with("```");
+
+        match code.as_mut() {
+            Some(block) if fence => {
+                out.extend(lean_code(block.trim_end_matches('\n')));
+
+                code = None;
+            }
+
+            Some(block) => {
+                block.push_str(line);
+
+                block.push('\n');
+            }
+
+            None if fence => code = Some(String::new()),
+
+            None if matches!(line.trim(), "***" | "---" | "___") => out.push(Line::default()),
+
+            None => {
+                for row in wrap_words(&plain_markdown(line), width) {
+                    out.push(Line::styled(row, prose));
+                }
+            }
+        }
+    }
+
+    if let Some(block) = code {
+        out.extend(lean_code(block.trim_end_matches('\n')));
+    }
+
+    // Rules and the blank lines around them would otherwise stack up.
+    out.dedup_by(|a, b| a.width() == 0 && b.width() == 0);
+
+    while out.last().is_some_and(|l| l.width() == 0) {
+        out.pop();
+    }
+
+    out
+}
+
+/// One line of Markdown prose as plain text: `[text](url)` keeps its text, and
+/// emphasis stars go, except inside backticks where `*` may be multiplication.
+fn plain_markdown(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+
+    let mut chars = line.chars().peekable();
+
+    let mut in_code = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '`' => {
+                in_code = !in_code;
+
+                out.push(c);
+            }
+
+            '*' if !in_code => {}
+
+            '[' if !in_code => {}
+
+            ']' if !in_code && chars.peek() == Some(&'(') => {
+                // Drop the link target, brackets nested in a URL included.
+                let mut depth = 0;
+
+                for t in chars.by_ref() {
+                    match t {
+                        '(' => depth += 1,
+
+                        ')' if depth == 1 => break,
+
+                        ')' => depth -= 1,
+
+                        _ => {}
+                    }
+                }
+            }
+
+            _ => out.push(c),
+        }
+    }
+
+    out
+}
+
+/// Greedy word wrap for prose. An empty line stays one empty line, and a word
+/// longer than the width is split.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+
+    let mut rows: Vec<String> = Vec::new();
+
+    let mut row = String::new();
+
+    for word in text.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+
+        while word.len() > width {
+            if !row.is_empty() {
+                rows.push(std::mem::take(&mut row));
+            }
+
+            rows.push(word.drain(..width).collect());
+        }
+
+        let fits = row.is_empty() || row.chars().count() + 1 + word.len() <= width;
+
+        if !fits {
+            rows.push(std::mem::take(&mut row));
+        }
+
+        if !row.is_empty() {
+            row.push(' ');
+        }
+
+        row.extend(word);
+    }
+
+    if !row.is_empty() || rows.is_empty() {
+        rows.push(row);
+    }
+
+    rows
 }
 
 /// Break styled text into lines at most `width` columns wide. A broken line
@@ -1292,6 +1442,36 @@ mod tests {
         terminal.draw(|frame| super::render(frame, app)).unwrap();
 
         format!("{}", terminal.backend())
+    }
+
+    #[test]
+    fn hover_markdown_reads_as_lean_code_and_prose() {
+        use ratatui::style::Style;
+        use ratatui::text::Line;
+
+        // What Lean 4.35 sends for `Nat.succ`, verbatim.
+        let hover = "```lean\nNat.succ (n : Nat) : Nat\n```\n***\nThe successor of a natural number `n`.\n\nUsing `Nat.succ n` should usually be avoided in favor of `n + 1`, which is the [simp normal\nform](https://lean-lang.org/doc/reference/4.35.0/find/?domain=Verso.Genre.Manual.section&name=simp-normal-forms).\n\n***\n*import Init.Prelude*";
+
+        let code = |c: &str| vec![Line::from(format!("CODE {c}"))];
+
+        let lines: Vec<String> = super::markdown_lines(hover, 40, Style::default(), &code).iter().map(|l| l.to_string()).collect();
+
+        assert_eq!(lines[0], "CODE Nat.succ (n : Nat) : Nat", "the signature goes to the Lean colouring");
+
+        assert!(lines.iter().all(|l| l.chars().count() <= 40 || l.starts_with("CODE")), "{lines:#?}");
+
+        let text = lines.join("\n");
+
+        assert!(text.contains("simp normal") && !text.contains("https://"), "a link keeps its text: {text}");
+
+        assert!(text.ends_with("import Init.Prelude"), "emphasis stars go: {text}");
+
+        assert!(!lines.windows(2).any(|w| w[0].is_empty() && w[1].is_empty()), "no stacked blank lines: {lines:#?}");
+    }
+
+    #[test]
+    fn plain_markdown_keeps_stars_inside_code() {
+        assert_eq!(super::plain_markdown("**bold** and `n * m` and [x](http://a.b/(c))."), "bold and `n * m` and x.");
     }
 
     #[test]

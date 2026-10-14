@@ -40,25 +40,32 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-/// What Lean says holds at the caret.
+/// What Lean says about the caret.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Goals {
+pub struct AtCaret {
     /// The tactic state: `None` outside a tactic proof, empty once it is done.
     pub tactic: Option<Vec<String>>,
 
     /// The type the term at the caret is expected to have.
     pub expected: Option<String>,
+
+    /// The name under the caret: its signature and documentation, in Markdown.
+    pub hover: Option<String>,
 }
 
-/// The two questions sent for one caret position, and the answers so far.
+/// The questions sent for one caret position, and the answers so far.
 struct Asking {
     tactic_id: i64,
 
     term_id: i64,
 
+    hover_id: i64,
+
     tactic: Option<Option<Vec<String>>>,
 
     expected: Option<Option<String>>,
+
+    hover: Option<Option<String>>,
 
     /// Either question came back as an error.
     failed: bool,
@@ -96,7 +103,7 @@ pub struct Session {
     /// Times the open file has finished being checked.
     checked: u64,
 
-    goals: Option<Goals>,
+    at_caret: Option<AtCaret>,
 }
 
 struct Doc {
@@ -153,7 +160,7 @@ impl Session {
             asking: None,
             asked: None,
             checked: 0,
-            goals: None,
+            at_caret: None,
         })
     }
 
@@ -176,7 +183,7 @@ impl Session {
 
         self.asked = None;
 
-        self.goals = None;
+        self.at_caret = None;
 
         self.doc = Some(Doc {
             path: path.to_path_buf(),
@@ -364,7 +371,13 @@ impl Session {
 
         let result = &message["result"];
 
-        if message.get("error").is_some() && (id == Some(asking.tactic_id) || id == Some(asking.term_id)) {
+        let ours = [asking.tactic_id, asking.term_id, asking.hover_id].map(Some).contains(&id);
+
+        if !ours {
+            return false;
+        }
+
+        if message.get("error").is_some() {
             asking.failed = true;
         }
 
@@ -373,14 +386,14 @@ impl Session {
         } else if id == Some(asking.term_id) {
             asking.expected = Some(result["goal"].as_str().map(str::to_string));
         } else {
-            return false;
+            asking.hover = Some(hover_text(result));
         }
 
-        let (Some(tactic), Some(expected)) = (&asking.tactic, &asking.expected) else {
+        let (Some(tactic), Some(expected), Some(hover)) = (&asking.tactic, &asking.expected, &asking.hover) else {
             return false;
         };
 
-        let goals = Goals { tactic: tactic.clone(), expected: expected.clone() };
+        let answer = AtCaret { tactic: tactic.clone(), expected: expected.clone(), hover: hover.clone() };
 
         let failed = asking.failed;
 
@@ -390,16 +403,16 @@ impl Session {
             return false;
         }
 
-        let changed = self.goals.as_ref() != Some(&goals);
+        let changed = self.at_caret.as_ref() != Some(&answer);
 
-        self.goals = Some(goals);
+        self.at_caret = Some(answer);
 
         changed
     }
 
-    /// Ask what holds at char `at`, unless that is already known or asked.
-    /// One question is in flight at a time, so a caret that keeps moving gets
-    /// its answer for where it stops rather than for every step on the way.
+    /// Ask about char `at`, unless that is already known or asked. One set of
+    /// questions is in flight at a time, so a caret that keeps moving gets its
+    /// answer for where it stops rather than for every step on the way.
     pub fn ask_goals(&mut self, at: usize) {
         let Some(doc) = self.doc.as_ref().filter(|doc| doc.opened) else {
             return;
@@ -420,16 +433,26 @@ impl Session {
 
         let tactic_id = self.server.request("$/lean/plainGoal", params.clone());
 
-        let term_id = self.server.request("$/lean/plainTermGoal", params);
+        let term_id = self.server.request("$/lean/plainTermGoal", params.clone());
 
-        self.asking = Some(Asking { tactic_id, term_id, tactic: None, expected: None, failed: false });
+        let hover_id = self.server.request("textDocument/hover", params);
+
+        self.asking = Some(Asking {
+            tactic_id,
+            term_id,
+            hover_id,
+            tactic: None,
+            expected: None,
+            hover: None,
+            failed: false,
+        });
 
         self.asked = Some(key);
     }
 
     /// The last answer about the caret.
-    pub fn goals(&self) -> Option<&Goals> {
-        self.goals.as_ref()
+    pub fn at_caret(&self) -> Option<&AtCaret> {
+        self.at_caret.as_ref()
     }
 
     fn take_progress(&mut self, params: &Value) -> bool {
@@ -515,6 +538,22 @@ fn tactic_goals(result: &Value) -> Option<Vec<String>> {
     let goals = result.get("goals")?.as_array()?;
 
     Some(goals.iter().filter_map(Value::as_str).map(str::to_string).collect())
+}
+
+/// The Markdown of a hover answer. LSP allows a markup object, a bare string
+/// or a list of either; Lean sends the first.
+fn hover_text(result: &Value) -> Option<String> {
+    let piece = |v: &Value| v.as_str().map(str::to_string).or_else(|| v["value"].as_str().map(str::to_string));
+
+    let contents = result.get("contents")?;
+
+    let text = match contents.as_array() {
+        Some(list) => list.iter().filter_map(piece).collect::<Vec<_>>().join("\n\n"),
+
+        None => piece(contents)?,
+    };
+
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Where a position ends up after `replaced` is swapped for `inserted_len`
@@ -761,7 +800,7 @@ mod tests {
             asking: None,
             asked: None,
             checked: 0,
-            goals: None,
+            at_caret: None,
         };
 
         session.open(Path::new("/nonexistent/Test.lean"), &Rope::from_str(text));
@@ -774,8 +813,8 @@ mod tests {
         session.handle(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
     }
 
-    /// Two questions go out per caret position, their answers may come back
-    /// in either order, and only the pair together replaces the goals.
+    /// Three questions go out per caret position, their answers may come back
+    /// in any order, and only all of them together replace what is shown.
     #[cfg(unix)]
     #[test]
     fn goals_arrive_as_a_pair_in_any_order() {
@@ -783,25 +822,31 @@ mod tests {
 
         session.ask_goals(25);
 
-        let (tactic, term) = {
+        let (tactic, term, hover) = {
             let asking = session.asking.as_ref().expect("asked");
 
-            (asking.tactic_id, asking.term_id)
+            (asking.tactic_id, asking.term_id, asking.hover_id)
         };
 
         session.ask_goals(26);
 
         assert_eq!(session.asking.as_ref().map(|a| a.tactic_id), Some(tactic), "one question in flight at a time");
 
-        assert!(!answer(&mut session, term, Value::Null), "half an answer changes nothing");
+        assert!(!answer(&mut session, term, Value::Null), "part of an answer changes nothing");
 
-        assert!(session.goals().is_none());
+        assert!(!answer(&mut session, hover, json!({ "contents": { "kind": "markdown", "value": "```lean\nTrue : Prop\n```" } })));
+
+        assert!(session.at_caret().is_none());
 
         assert!(answer(&mut session, tactic, json!({ "goals": ["⊢ True"] })));
 
-        assert_eq!(session.goals().and_then(|g| g.tactic.clone()), Some(vec!["⊢ True".to_string()]));
+        let shown = session.at_caret().cloned().unwrap();
 
-        assert!(session.asking.is_none(), "the pair is complete, so the next caret can be asked about");
+        assert_eq!(shown.tactic, Some(vec!["⊢ True".to_string()]));
+
+        assert_eq!(shown.hover.as_deref(), Some("```lean\nTrue : Prop\n```"));
+
+        assert!(session.asking.is_none(), "the set is complete, so the next caret can be asked about");
     }
 
     /// An error answer, as when the text moved on, keeps the goals on screen
@@ -813,21 +858,27 @@ mod tests {
 
         session.ask_goals(25);
 
-        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+        let ids = |s: &Session| s.asking.as_ref().map(|a| (a.tactic_id, a.term_id, a.hover_id)).unwrap();
+
+        let (tactic, term, hover) = ids(&session);
 
         answer(&mut session, tactic, json!({ "goals": ["⊢ True"] }));
 
         answer(&mut session, term, Value::Null);
 
+        answer(&mut session, hover, Value::Null);
+
         session.ask_goals(30);
 
-        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+        let (tactic, term, hover) = ids(&session);
 
         session.handle(json!({ "jsonrpc": "2.0", "id": tactic, "error": { "code": -32801, "message": "content modified" } }));
 
+        answer(&mut session, hover, Value::Null);
+
         assert!(!answer(&mut session, term, Value::Null));
 
-        assert_eq!(session.goals().and_then(|g| g.tactic.clone()), Some(vec!["⊢ True".to_string()]));
+        assert_eq!(session.at_caret().and_then(|g| g.tactic.clone()), Some(vec!["⊢ True".to_string()]));
 
         assert!(session.asking.is_none(), "and the next change can ask again");
     }
@@ -861,11 +912,11 @@ mod tests {
 
         session.ask_goals(3);
 
-        let (tactic, term) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id)).unwrap();
+        let (tactic, term, hover) = session.asking.as_ref().map(|a| (a.tactic_id, a.term_id, a.hover_id)).unwrap();
 
-        answer(&mut session, tactic, Value::Null);
-
-        answer(&mut session, term, Value::Null);
+        for id in [tactic, term, hover] {
+            answer(&mut session, id, Value::Null);
+        }
 
         session.ask_goals(3);
 
@@ -888,6 +939,21 @@ mod tests {
         session.ask_goals(3);
 
         assert!(session.asking.is_some(), "a finished check asks again");
+    }
+
+    #[test]
+    fn hover_text_reads_every_shape_lsp_allows() {
+        let markup = json!({ "contents": { "kind": "markdown", "value": "```lean\nNat.succ (n : Nat) : Nat\n```" } });
+
+        assert_eq!(hover_text(&markup).as_deref(), Some("```lean\nNat.succ (n : Nat) : Nat\n```"));
+
+        assert_eq!(hover_text(&json!({ "contents": "plain" })).as_deref(), Some("plain"));
+
+        assert_eq!(hover_text(&json!({ "contents": ["a", { "language": "lean", "value": "b" }] })).as_deref(), Some("a\n\nb"));
+
+        assert_eq!(hover_text(&Value::Null), None, "nothing under the caret");
+
+        assert_eq!(hover_text(&json!({ "contents": { "kind": "markdown", "value": "  " } })), None);
     }
 
     /// The three shapes of answer the real server gives to `plainGoal`.

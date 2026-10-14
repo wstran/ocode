@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 
 use crate::abbrev;
 use crate::buffer::{self, Buffer, DiskEvent};
+use crate::complete::{self, Popup};
 use crate::highlight::SyntaxHighlighter;
 use crate::lean;
 use crate::media::{self, Loaded, Media};
@@ -154,6 +155,16 @@ pub struct App {
 
     /// The caret the panel was scrolled for; moving it starts from the top.
     infoview_caret: Option<usize>,
+
+    /// The names Lean offers for the word being typed in a Lean file.
+    pub completion: Option<Popup>,
+
+    /// A completion asked for by a keystroke, sent once the server has the
+    /// text that keystroke made.
+    completion_wanted: bool,
+
+    /// Where the caret was drawn, to put the completion list under it.
+    pub caret_cell: Option<(u16, u16)>,
 }
 
 impl App {
@@ -231,6 +242,9 @@ impl App {
             infoview_area: None,
             infoview_scroll: 0,
             infoview_caret: None,
+            completion: None,
+            completion_wanted: false,
+            caret_cell: None,
         })
     }
 
@@ -295,6 +309,10 @@ impl App {
 
                 KeyCode::Char('g') => return self.toggle_infoview(),
 
+                // Ctrl+Space, where the system has not taken it for switching
+                // input sources; the list also opens by itself as names are typed.
+                KeyCode::Char(' ') => return self.open_completion(),
+
                 // Toggle comment. A legacy terminal sends Ctrl+/ as byte 0x1F,
                 // which crossterm cannot tell from Ctrl+7; a terminal speaking
                 // the kitty keyboard protocol reports Ctrl+/ directly. Accept
@@ -358,6 +376,12 @@ impl App {
     }
 
     fn handle_escape(&mut self) {
+        if self.completion.as_ref().is_some_and(|p| p.shown) {
+            self.close_completion();
+
+            return;
+        }
+
         if let Some(buf) = self.buffer.as_mut() {
             // A Lean abbreviation being typed is the innermost layer: Esc keeps
             // it as typed instead of replacing it.
@@ -660,6 +684,10 @@ impl App {
     }
 
     fn on_editor_key(&mut self, key: KeyEvent) {
+        if self.completion_key(key) {
+            return;
+        }
+
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
         let alt = key.modifiers.contains(KeyModifiers::ALT);
@@ -827,7 +855,13 @@ impl App {
             }
 
             KeyCode::Char(c) if !ctrl && !alt => {
-                if buf.is_lean() { abbrev::type_char(buf, c) } else { buf.insert_char(c) }
+                if buf.is_lean() {
+                    abbrev::type_char(buf, c);
+
+                    self.note_typed(c);
+                } else {
+                    buf.insert_char(c);
+                }
             }
 
             _ => {}
@@ -1115,6 +1149,10 @@ impl App {
                 session.sync(&buf.rope);
 
                 session.ask_goals(buf.char_idx());
+
+                if std::mem::take(&mut self.completion_wanted) {
+                    session.ask_completions(buf.char_idx());
+                }
             }
 
             if self.infoview_caret != Some(buf.char_idx()) {
@@ -1131,8 +1169,14 @@ impl App {
 
             self.lean_failed = Some(path);
 
+            self.completion = None;
+
             self.set_error(format!("Lean stopped: {why}"));
+
+            return;
         }
+
+        self.refresh_completion();
     }
 
     /// Point the server at `path`, starting one in its project if the running
@@ -1166,6 +1210,173 @@ impl App {
 
         if let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) {
             session.open(path, &buf.rope);
+        }
+    }
+
+    /// The keys the completion list takes while it is on screen: arrows choose,
+    /// Tab or Enter take the choice. Returns whether the key was taken.
+    fn completion_key(&mut self, key: KeyEvent) -> bool {
+        let plain = key.modifiers.is_empty();
+
+        let Some(popup) = self.completion.as_mut().filter(|p| p.shown) else {
+            return false;
+        };
+
+        match key.code {
+            KeyCode::Up if plain => popup.step(-1),
+
+            KeyCode::Down if plain => popup.step(1),
+
+            KeyCode::Tab | KeyCode::Enter if plain => self.accept_completion(),
+
+            _ => return false,
+        }
+
+        true
+    }
+
+    /// After a char is typed into a Lean file: open the list after a `.` that
+    /// follows a name, or once a new name is two letters long; close it when
+    /// the word ends. Waiting for the second letter spares the server a
+    /// question for every `h`, `n` and `x` of a proof. It goes by the text
+    /// before the caret, not by `ch`: typing the last letter of `\forall`
+    /// leaves `∀` there, not the letter.
+    fn note_typed(&mut self, ch: char) {
+        let Some(buf) = self.buffer.as_ref() else {
+            return;
+        };
+
+        // An abbreviation being typed is not a name.
+        if buf.abbrev.is_some() {
+            return self.close_completion();
+        }
+
+        let at = buf.char_idx();
+
+        let before = at.checked_sub(1).map(|i| buf.rope.char(i));
+
+        if ch == '.' && before == Some('.') {
+            let after_name = at
+                .checked_sub(2)
+                .map(|i| buf.rope.char(i))
+                .is_some_and(|c| complete::is_name_char(c) || matches!(c, ')' | ']' | '⟩'));
+
+            if after_name {
+                self.completion = Some(Popup::new(at, true));
+
+                self.completion_wanted = true;
+            } else {
+                self.close_completion();
+            }
+
+            return;
+        }
+
+        if !before.is_some_and(complete::is_name_char) {
+            return self.close_completion();
+        }
+
+        let start = complete::word_start(&buf.rope, at);
+
+        // A number is not a name.
+        if buf.rope.char(start).is_numeric() {
+            return self.close_completion();
+        }
+
+        if self.completion.as_ref().is_some_and(|p| p.start == start) {
+            return;
+        }
+
+        if at - start >= complete::AUTO_AFTER {
+            self.completion = Some(Popup::new(start, false));
+
+            self.completion_wanted = true;
+        } else {
+            self.close_completion();
+        }
+    }
+
+    fn open_completion(&mut self) {
+        let Some(buf) = self.buffer.as_ref().filter(|b| b.is_lean() && b.abbrev.is_none()) else {
+            return;
+        };
+
+        let start = complete::word_start(&buf.rope, buf.char_idx());
+
+        self.completion = Some(Popup::new(start, true));
+
+        self.completion_wanted = true;
+    }
+
+    fn close_completion(&mut self) {
+        self.completion = None;
+
+        self.completion_wanted = false;
+
+        if let Some(session) = self.lean.as_mut() {
+            session.drop_completions();
+        }
+    }
+
+    /// Put the selected name in place of the word typed so far.
+    fn accept_completion(&mut self) {
+        let chosen = self.completion.as_ref().and_then(|popup| {
+            let index = *popup.matches.get(popup.selected)?;
+
+            let (_, items) = self.lean.as_ref()?.completions()?;
+
+            Some((popup.start, items.get(index)?.label.clone()))
+        });
+
+        if let (Some((start, label)), Some(buf)) = (chosen, self.buffer.as_mut()) {
+            let end = buf.char_idx().max(start);
+
+            buf.replace_chars(start..end, &label, start + label.chars().count());
+        }
+
+        self.close_completion();
+    }
+
+    /// Bring the completion list up to date with the caret and what has been
+    /// offered: narrow it to the word typed, close it once the caret leaves
+    /// the word or nothing fits, and ask for the selected name's type.
+    fn refresh_completion(&mut self) {
+        let (Some(popup), Some(buf), Some(session)) = (self.completion.as_mut(), self.buffer.as_ref(), self.lean.as_mut())
+        else {
+            return;
+        };
+
+        let at = buf.char_idx();
+
+        let line_start = buf.rope.line_to_char(buf.cursor_line);
+
+        let in_word = (line_start..=at).contains(&popup.start)
+            && (popup.start..at).all(|i| complete::is_name_char(buf.rope.char(i)));
+
+        let typed = buf.rope.slice(popup.start.min(at)..at).to_string();
+
+        let nothing_fits = match (in_word, session.completions()) {
+            (true, Some((_, items))) => {
+                popup.narrow(items, &typed);
+
+                popup.matches.is_empty()
+            }
+
+            (true, None) => !session.completing() && !self.completion_wanted,
+
+            (false, _) => true,
+        };
+
+        if nothing_fits {
+            return self.close_completion();
+        }
+
+        popup.shown = popup.visible(typed.chars().count());
+
+        if popup.shown {
+            if let Some(&index) = popup.matches.get(popup.selected) {
+                session.resolve(index);
+            }
         }
     }
 
@@ -3187,6 +3398,128 @@ mod tests {
         let name = screen_at(&mut app, 3, 16);
 
         assert!(name.contains("Under the caret") && name.contains("Nat : Type"), "{name}");
+
+        app.stop_lean();
+    }
+
+    /// When typing opens, keeps or closes the completion list, before any
+    /// server is involved.
+    #[test]
+    fn typing_a_name_opens_the_completion_list_and_other_chars_close_it() {
+        let mut app = lean_app("complete_open", "");
+
+        type_keys(&mut app, "N");
+
+        assert!(app.completion.is_none(), "one letter asks nothing: `h` and `n` are everywhere in a proof");
+
+        type_keys(&mut app, "a");
+
+        assert!(app.completion.as_ref().is_some_and(|p| p.start == 0 && !p.explicit), "the second letter asks");
+
+        type_keys(&mut app, "t");
+
+        assert_eq!(app.completion.as_ref().map(|p| p.start), Some(0), "the same word keeps its list");
+
+        type_keys(&mut app, " ");
+
+        assert!(app.completion.is_none(), "a space ends the word");
+
+        type_keys(&mut app, "xs.");
+
+        assert!(app.completion.as_ref().is_some_and(|p| p.start == 7 && p.explicit), "a dot after a name asks at once");
+
+        type_keys(&mut app, " 42");
+
+        assert!(app.completion.is_none(), "a number is not a name");
+
+        type_keys(&mut app, " \\al");
+
+        assert!(app.completion.is_none(), "nor is an abbreviation");
+
+        // Away from Lean files nothing is offered.
+        let mut plain = app_with("complete_plain", "");
+
+        type_keys(&mut plain, "Nat");
+
+        assert!(plain.completion.is_none());
+    }
+
+    /// Completion against the real server: the list narrows to the word, the
+    /// selected name's type is fetched, and Tab puts the name in place.
+    /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_completes_a_name_as_it_is_typed() {
+        let mut app = lean_app("server_complete", "def f (xs : List Nat) := \n");
+
+        app.buffer.as_mut().unwrap().move_to_pos(0, 25);
+
+        settle_goals(&mut app);
+
+        for ch in "xs.ma".chars() {
+            app.on_key(plain(KeyCode::Char(ch)));
+
+            app.service_lean();
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        loop {
+            app.service_lean();
+
+            let ready = app.completion.as_ref().is_some_and(|p| p.shown)
+                && app.lean.as_ref().is_some_and(|s| !s.busy());
+
+            if ready {
+                break;
+            }
+
+            assert!(Instant::now() < deadline, "no completion list; status: {}", app.status);
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let shown = screen(&mut app, 100, 16);
+
+        assert!(shown.contains(" map "), "map is offered for `ma`: {shown}");
+
+        // Walk to `map` and take it.
+        let labels: Vec<String> = {
+            let (_, items) = app.lean.as_ref().unwrap().completions().unwrap();
+
+            app.completion.as_ref().unwrap().matches.iter().map(|&i| items[i].label.clone()).collect()
+        };
+
+        let map_at = labels.iter().position(|l| l == "map").expect("map fits `ma`");
+
+        for _ in 0..map_at {
+            app.on_key(plain(KeyCode::Down));
+        }
+
+        settle_goals(&mut app);
+
+        let detail = {
+            let (_, items) = app.lean.as_ref().unwrap().completions().unwrap();
+
+            let index = app.completion.as_ref().map(|p| p.matches[p.selected]).unwrap();
+
+            items[index].detail.clone().expect("the selected name's type was fetched")
+        };
+
+        assert!(detail.contains('→'), "map's type is a function: {detail}");
+
+        // The source has no arrow in it, so one on screen is the type's.
+        let with_type = screen(&mut app, 100, 16);
+
+        let shown_part: String = detail.chars().take(20).collect();
+
+        assert!(with_type.contains(&shown_part), "the type shows at the foot: {with_type}");
+
+        app.on_key(plain(KeyCode::Tab));
+
+        assert_eq!(text_of(&app), "def f (xs : List Nat) := xs.map\n");
+
+        assert!(app.completion.is_none());
 
         app.stop_lean();
     }

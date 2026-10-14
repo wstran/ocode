@@ -76,6 +76,7 @@ application. Hold `Shift` with any motion to select instead of move.
 | `Ctrl+B` | File tree: show, focus, hide |
 | `Ctrl+R` | Reload from disk |
 | `Ctrl+G` | Lean: show or hide the goals panel |
+| `Ctrl+Space` | Lean: offer names to complete the word (it also opens by itself) |
 | `Ctrl+Q` | Quit |
 | `Esc` | Step back one layer: clear the selection, else hide the tree, else open it to pick another file. Again with nothing left to do quits |
 
@@ -218,6 +219,14 @@ Lines Lean is still checking are marked `│`. The server starts when a Lean fil
 opens and stops when it closes: `lake serve` inside a Lake project, so imports
 such as Mathlib resolve, or `lean --server` for a file on its own. Lean works
 while it checks; `ocode` only wakes to show what it found.
+
+**Completion.** Type a `.` after a name, or two letters of one, and Lean
+offers the names that fit, narrowing as you type: names that start with what
+you typed first, then names with a dotted part that does, so `succ_p` finds
+`Nat.succ_pos`, then names holding its letters in order. The selected name's
+type shows along the bottom of the list. `↑`/`↓` choose, `Tab` or `Enter`
+takes the name, `Esc` closes the list. `Ctrl+Space` opens it on demand, where
+macOS has not taken that key for switching input sources.
 
 **Unicode input.** Type `\` and a name, and the symbol takes its place as you
 type, with the same abbreviations as the official Lean editors:

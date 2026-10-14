@@ -53,6 +53,28 @@ pub struct AtCaret {
     pub hover: Option<String>,
 }
 
+/// A name Lean offers to complete what is being typed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Completion {
+    pub label: String,
+
+    /// Its type, once asked for: Lean leaves it out of the list, which can run
+    /// to thousands of names, and gives it for one name on request.
+    pub detail: Option<String>,
+
+    /// The item as the server sent it, which is what it wants back when asked
+    /// for the detail.
+    raw: Value,
+}
+
+#[cfg(test)]
+impl Completion {
+    /// A name as the list would hold it, for tests of what is done with it.
+    pub fn named(label: &str) -> Self {
+        Self { label: label.to_string(), detail: None, raw: json!({ "label": label }) }
+    }
+}
+
 /// The questions sent for one caret position, and the answers so far.
 struct Asking {
     tactic_id: i64,
@@ -104,6 +126,15 @@ pub struct Session {
     checked: u64,
 
     at_caret: Option<AtCaret>,
+
+    /// The completion question in flight: its id and where it was asked.
+    completing: Option<(i64, usize)>,
+
+    /// The names offered for the word at a char index.
+    completions: Option<(usize, Vec<Completion>)>,
+
+    /// The detail question in flight: its id and the name's index.
+    resolving: Option<(i64, usize)>,
 }
 
 struct Doc {
@@ -161,6 +192,9 @@ impl Session {
             asked: None,
             checked: 0,
             at_caret: None,
+            completing: None,
+            completions: None,
+            resolving: None,
         })
     }
 
@@ -184,6 +218,8 @@ impl Session {
         self.asked = None;
 
         self.at_caret = None;
+
+        self.drop_completions();
 
         self.doc = Some(Doc {
             path: path.to_path_buf(),
@@ -316,7 +352,17 @@ impl Session {
                     return false;
                 }
 
-                self.take_answer(id.as_i64(), &message)
+                let id = id.as_i64();
+
+                if id.is_some() && id == self.completing.map(|(asked, _)| asked) {
+                    return self.take_completions(&message["result"]);
+                }
+
+                if id.is_some() && id == self.resolving.map(|(asked, _)| asked) {
+                    return self.take_detail(&message["result"]);
+                }
+
+                self.take_answer(id, &message)
             }
 
             (None, Some("textDocument/publishDiagnostics")) => self.take_diagnostics(&message["params"]),
@@ -455,6 +501,116 @@ impl Session {
         self.at_caret.as_ref()
     }
 
+    /// Ask which names could complete the word at char `at`. Lean answers
+    /// with every name that fits the context, not just the ones the word
+    /// starts, so one question serves the whole word: the caller narrows the
+    /// list as more of it is typed.
+    pub fn ask_completions(&mut self, at: usize) {
+        let Some(doc) = self.doc.as_ref().filter(|doc| doc.opened) else {
+            return;
+        };
+
+        let (line, character) = position(&doc.synced, at.min(doc.synced.len_chars()));
+
+        let id = self.server.request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": doc.uri },
+                "position": { "line": line, "character": character },
+            }),
+        );
+
+        self.completing = Some((id, at));
+
+        self.completions = None;
+
+        self.resolving = None;
+    }
+
+    fn take_completions(&mut self, result: &Value) -> bool {
+        let Some((_, at)) = self.completing.take() else {
+            return false;
+        };
+
+        // A bare list or a CompletionList; both are allowed.
+        let items = result.get("items").unwrap_or(result).as_array().cloned().unwrap_or_default();
+
+        let completions = items
+            .into_iter()
+            .filter_map(|raw| {
+                let label = raw["label"].as_str()?.to_string();
+
+                let detail = raw["detail"].as_str().map(str::to_string);
+
+                Some(Completion { label, detail, raw })
+            })
+            .collect();
+
+        self.completions = Some((at, completions));
+
+        true
+    }
+
+    /// The names offered, and the char index of the word they were asked for.
+    pub fn completions(&self) -> Option<(usize, &[Completion])> {
+        self.completions.as_ref().map(|(at, list)| (*at, list.as_slice()))
+    }
+
+    /// Still waiting for the names.
+    pub fn completing(&self) -> bool {
+        self.completing.is_some()
+    }
+
+    pub fn drop_completions(&mut self) {
+        self.completing = None;
+
+        self.completions = None;
+
+        self.resolving = None;
+    }
+
+    /// Ask for the type of the offered name at `index`, unless it is known or
+    /// already asked for. One at a time: the one the user has selected.
+    pub fn resolve(&mut self, index: usize) {
+        if self.resolving.is_some() {
+            return;
+        }
+
+        let Some(raw) = self
+            .completions
+            .as_ref()
+            .and_then(|(_, list)| list.get(index))
+            .filter(|c| c.detail.is_none())
+            .map(|c| c.raw.clone())
+        else {
+            return;
+        };
+
+        let id = self.server.request("completionItem/resolve", raw);
+
+        self.resolving = Some((id, index));
+    }
+
+    fn take_detail(&mut self, result: &Value) -> bool {
+        let Some((_, index)) = self.resolving.take() else {
+            return false;
+        };
+
+        // A name without a type still counts as answered, so it is not asked
+        // about again on every frame.
+        let detail = result["detail"].as_str().unwrap_or_default().to_string();
+
+        match self.completions.as_mut().and_then(|(_, list)| list.get_mut(index)) {
+            Some(item) => {
+                item.detail = Some(detail);
+
+                true
+            }
+
+            None => false,
+        }
+    }
+
     fn take_progress(&mut self, params: &Value) -> bool {
         let Some(doc) = self.current_doc(params, &params["textDocument"]["uri"]) else {
             return false;
@@ -506,6 +662,8 @@ impl Session {
     pub fn busy(&self) -> bool {
         self.initializing.is_some()
             || self.asking.is_some()
+            || self.completing.is_some()
+            || self.resolving.is_some()
             || self.doc.as_ref().is_some_and(|doc| !doc.processing.is_empty())
             || self.last_sent.is_some_and(|at| at.elapsed() < ANSWER_WINDOW)
     }
@@ -801,6 +959,9 @@ mod tests {
             asked: None,
             checked: 0,
             at_caret: None,
+            completing: None,
+            completions: None,
+            resolving: None,
         };
 
         session.open(Path::new("/nonexistent/Test.lean"), &Rope::from_str(text));

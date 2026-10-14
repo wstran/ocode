@@ -2,13 +2,14 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::abbrev;
 use crate::app::{App, Focus};
 use crate::buffer::{self, Buffer};
 use crate::highlight::UiPalette;
-use crate::lean::{Diagnostic, Severity};
+use crate::complete;
+use crate::lean::{Completion, Diagnostic, Severity};
 use crate::media::{self, Media};
 
 const TREE_WIDTH: u16 = 32;
@@ -928,13 +929,85 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
         && buf.cursor_col >= buf.scroll_col
         && buf.cursor_col - buf.scroll_col < text_width.max(1);
 
+    app.caret_cell = None;
+
     if app.focus == Focus::Editor && app.search.is_none() && caret_visible {
         let cx = area.x + gutter_w as u16 + (buf.cursor_col - buf.scroll_col) as u16;
 
         let cy = area.y + (buf.cursor_line - buf.scroll_row) as u16;
 
         frame.set_cursor_position((cx, cy));
+
+        app.caret_cell = Some((cx, cy));
     }
+
+    render_completion(frame, app, area, pal);
+}
+
+/// The names Lean offers for the word being typed, in a box under the caret
+/// (over it near the bottom), with the selected name's type along its foot.
+fn render_completion(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
+    let (Some(popup), Some((cx, cy)), Some(buf), Some(session)) =
+        (app.completion.as_ref(), app.caret_cell, app.buffer.as_ref(), app.lean.as_ref())
+    else {
+        return;
+    };
+
+    let Some((_, items)) = session.completions().filter(|_| popup.shown) else {
+        return;
+    };
+
+    let rows: Vec<&Completion> = popup
+        .matches
+        .iter()
+        .skip(popup.scroll)
+        .take(complete::ROWS)
+        .filter_map(|&i| items.get(i))
+        .collect();
+
+    let selected = popup.matches.get(popup.selected).and_then(|&i| items.get(i));
+
+    let detail = selected.map(|c| c.detail.clone().unwrap_or_else(|| "…".to_string())).unwrap_or_default();
+
+    let widest = rows.iter().map(|c| c.label.chars().count()).max().unwrap_or(0);
+
+    let width = (widest.max(detail.chars().count().min(56)) + 4).clamp(24, 60).min(area.width as usize) as u16;
+
+    let height = (rows.len() + 3) as u16;
+
+    if area.height < height + 1 || width < 6 {
+        return;
+    }
+
+    // Line the names up under the start of the word, its first letter under
+    // the box's first column of text.
+    let typed = buf.char_idx().saturating_sub(popup.start) as u16;
+
+    let x = cx.saturating_sub(typed + 2).clamp(area.x, area.x + area.width - width);
+
+    let y = if cy + 1 + height <= area.y + area.height { cy + 1 } else { cy.saturating_sub(height) };
+
+    let rect = Rect { x, y, width, height };
+
+    let selection = Style::default().bg(pal.selection).fg(pal.fg);
+
+    let mut lines: Vec<Line> = rows
+        .iter()
+        .enumerate()
+        .map(|(row, c)| {
+            let style = if popup.scroll + row == popup.selected { selection } else { Style::default().fg(pal.fg) };
+
+            Line::styled(format!(" {:w$}", clip(&c.label, width as usize - 3), w = width as usize - 3), style)
+        })
+        .collect();
+
+    lines.push(Line::styled(format!(" {}", clip(&detail, width as usize - 3)), Style::default().fg(pal.dim)));
+
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(pal.dim));
+
+    frame.render_widget(Clear, rect);
+
+    frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn render_media(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {

@@ -2,6 +2,7 @@ mod abbrev;
 mod app;
 mod buffer;
 mod comment;
+mod complete;
 mod config;
 mod highlight;
 mod lean;

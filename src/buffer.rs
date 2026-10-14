@@ -102,6 +102,9 @@ pub struct Buffer {
 
     /// A Lean abbreviation being typed (`\forall` on its way to `∀`).
     pub abbrev: Option<Tracked>,
+
+    /// Opened to read, not to edit: a library file a definition led to.
+    pub read_only: bool,
 }
 
 impl Buffer {
@@ -140,6 +143,7 @@ impl Buffer {
             last_insert_char: None,
             anchor: None,
             abbrev: None,
+            read_only: false,
         })
     }
 
@@ -1459,6 +1463,7 @@ mod tests {
             disk_mtime: None,
             disk_changed: false,
             abbrev: None,
+            read_only: false,
         }
     }
 

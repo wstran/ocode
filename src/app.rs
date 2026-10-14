@@ -12,6 +12,16 @@ use crate::lean;
 use crate::media::{self, Loaded, Media};
 use crate::tree::FileTree;
 
+/// A place to come back to after following a definition.
+struct Jump {
+    path: PathBuf,
+
+    /// Char index of the caret there.
+    at: usize,
+
+    read_only: bool,
+}
+
 /// Changes Lean offered for the caret's line, such as several proofs `apply?`
 /// found, waiting for one to be chosen.
 pub struct Choice {
@@ -180,6 +190,12 @@ pub struct App {
     /// Ctrl+T asked Lean what it can apply; its answer is acted on when it
     /// comes.
     actions_wanted: bool,
+
+    /// Ctrl+D asked Lean where the name at the caret is defined.
+    definition_wanted: bool,
+
+    /// Where definitions were followed from, latest last, for Ctrl+O.
+    jumps: Vec<Jump>,
 }
 
 impl App {
@@ -262,6 +278,8 @@ impl App {
             caret_cell: None,
             choice: None,
             actions_wanted: false,
+            definition_wanted: false,
+            jumps: Vec::new(),
         })
     }
 
@@ -304,6 +322,14 @@ impl App {
             return;
         }
 
+        if key.code == KeyCode::F(12) {
+            return self.ask_definition();
+        }
+
+        if self.refuses_edit(&key) {
+            return self.set_error("Read-only: a library file, opened to read (Ctrl+O goes back)".to_string());
+        }
+
         if ctrl {
             match key.code {
                 KeyCode::Char('q') => return self.request_quit(),
@@ -327,6 +353,10 @@ impl App {
                 KeyCode::Char('g') => return self.toggle_infoview(),
 
                 KeyCode::Char('t') => return self.ask_suggestion(),
+
+                KeyCode::Char('d') => return self.ask_definition(),
+
+                KeyCode::Char('o') => return self.jump_back(),
 
                 // Ctrl+Space, where the system has not taken it for switching
                 // input sources; the list also opens by itself as names are typed.
@@ -977,6 +1007,11 @@ impl App {
         // stopped it.
         self.lean_failed = None;
 
+        // Lists offered for the old file point into its text.
+        self.choice = None;
+
+        self.completion = None;
+
         let loaded = match media::classify(&path) {
             Ok(Loaded::Text) => {
                 let syntax = self.highlighter.syntax_name_for_path(&path);
@@ -1157,7 +1192,16 @@ impl App {
 
         let attached = self.lean.as_ref().and_then(|s| s.path()) == Some(path.as_path());
 
-        if !attached && self.lean_failed.as_ref() != Some(&path) {
+        let read_only = self.buffer.as_ref().is_some_and(|b| b.read_only);
+
+        if !attached && read_only {
+            // A library file is read with the server already running, never a
+            // new one started in the library's folder, where `lake serve`
+            // could set about building Mathlib or Lean itself.
+            if let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) {
+                session.open(&path, &buf.rope);
+            }
+        } else if !attached && self.lean_failed.as_ref() != Some(&path) {
             self.attach_lean(&path);
         }
 
@@ -1204,6 +1248,14 @@ impl App {
                 self.actions_wanted = false;
 
                 self.offer_actions(actions);
+            }
+        }
+
+        if self.definition_wanted {
+            if let Some(found) = self.lean.as_mut().and_then(|s| s.take_found_definition()) {
+                self.definition_wanted = false;
+
+                self.follow_definition(found);
             }
         }
 
@@ -1495,6 +1547,140 @@ impl App {
         }
 
         true
+    }
+
+    /// Whether `key` would edit a read-only buffer: typing, deleting, pasting,
+    /// indenting, commenting, undoing.
+    fn refuses_edit(&self, key: &KeyEvent) -> bool {
+        let read_only = self.focus == Focus::Editor && self.buffer.as_ref().is_some_and(|b| b.read_only);
+
+        if !read_only {
+            return false;
+        }
+
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+        match key.code {
+            KeyCode::Char(c) if ctrl => matches!(c, 'v' | 'x' | 'k' | 'K' | 'z' | 'Z' | 'y' | '/' | '7' | 't'),
+
+            KeyCode::Char('d') if alt => true,
+
+            KeyCode::Char(_) => !alt,
+
+            KeyCode::Enter | KeyCode::Backspace | KeyCode::Delete | KeyCode::Tab | KeyCode::BackTab => true,
+
+            _ => false,
+        }
+    }
+
+    /// Ctrl+D or F12: ask Lean where the name at the caret is defined. Its
+    /// answer is followed when it comes.
+    fn ask_definition(&mut self) {
+        let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) else {
+            return;
+        };
+
+        session.ask_definition(buf.char_idx());
+
+        self.definition_wanted = true;
+    }
+
+    /// Go where Lean said the name is defined. A file outside the project, in
+    /// Mathlib or Lean itself, opens read-only, so it cannot be changed by
+    /// accident, and the place left is remembered for Ctrl+O.
+    fn follow_definition(&mut self, found: Option<lean::Place>) {
+        let Some(place) = found else {
+            return self.set_error("Lean knows of no definition here".to_string());
+        };
+
+        let Some(buf) = self.buffer.as_ref() else {
+            return;
+        };
+
+        let here = Jump { path: buf.path.clone(), at: buf.char_idx(), read_only: buf.read_only };
+
+        let same_file = lean::inside(&place.path, &buf.path) && lean::inside(&buf.path, &place.path);
+
+        if same_file {
+            let at = lean::char_at(&buf.rope, &place);
+
+            self.jumps.push(here);
+
+            if let Some(buf) = self.buffer.as_mut() {
+                buf.clear_selection();
+
+                buf.move_to_char(at);
+            }
+
+            return;
+        }
+
+        // A single buffer: opening the definition would put the edits away.
+        if buf.modified {
+            return self.set_error("Save first (Ctrl+S): the definition is in another file".to_string());
+        }
+
+        let library = self.lean.as_ref().is_some_and(|s| !lean::inside(s.root(), &place.path));
+
+        self.jumps.push(here);
+
+        self.open_at(place.path.clone(), library, |text| lean::char_at(text, &place));
+    }
+
+    /// Ctrl+O: back to where the last definition was followed from.
+    fn jump_back(&mut self) {
+        let Some(back) = self.jumps.last() else {
+            return self.set_error("Nowhere to go back to".to_string());
+        };
+
+        let Some(buf) = self.buffer.as_ref() else {
+            return;
+        };
+
+        if buf.path == back.path {
+            let at = back.at;
+
+            self.jumps.pop();
+
+            if let Some(buf) = self.buffer.as_mut() {
+                buf.clear_selection();
+
+                buf.move_to_char(at);
+            }
+
+            return;
+        }
+
+        if buf.modified {
+            return self.set_error("Save first (Ctrl+S): going back opens another file".to_string());
+        }
+
+        let Some(back) = self.jumps.pop() else {
+            return;
+        };
+
+        self.open_at(back.path, back.read_only, |_| back.at);
+    }
+
+    /// Open `path` with the caret at the char index `at` works out from its
+    /// text, read-only if asked. The tree stays as it is.
+    fn open_at(&mut self, path: PathBuf, read_only: bool, at: impl FnOnce(&ropey::Rope) -> usize) {
+        let keep_tree = self.tree_visible;
+
+        self.open_file(path.clone(), keep_tree);
+
+        let Some(buf) = self.buffer.as_mut().filter(|b| b.path == path) else {
+            // Opening failed and said why; the jump that led here is void.
+            return;
+        };
+
+        buf.read_only = read_only;
+
+        let at = at(&buf.rope);
+
+        buf.move_to_char(at);
     }
 
     /// Show or hide the goals panel beside a Lean file.
@@ -3709,6 +3895,136 @@ mod tests {
         assert!(line.starts_with("  exact ") && line.len() > "  exact ".len(), "{line}");
 
         assert!(app.status.starts_with("Applied: Try this"), "{}", app.status);
+
+        app.stop_lean();
+    }
+
+    /// A library file is for reading: nothing that would change it gets
+    /// through, while moving and copying still work.
+    #[test]
+    fn a_read_only_file_refuses_every_edit() {
+        let mut app = lean_app("read_only", "theorem t : True := trivial\n");
+
+        app.buffer.as_mut().unwrap().read_only = true;
+
+        type_keys(&mut app, "x\\al");
+
+        for key in [
+            plain(KeyCode::Enter),
+            plain(KeyCode::Backspace),
+            plain(KeyCode::Delete),
+            plain(KeyCode::Tab),
+            ctrl(KeyCode::Char('v')),
+            ctrl(KeyCode::Char('x')),
+            ctrl(KeyCode::Char('k')),
+            ctrl(KeyCode::Char('z')),
+            ctrl(KeyCode::Char('t')),
+            ctrl(KeyCode::Char('/')),
+        ] {
+            app.on_key(key);
+        }
+
+        assert_eq!(text_of(&app), "theorem t : True := trivial\n");
+
+        assert!(app.status.starts_with("Read-only"), "{}", app.status);
+
+        app.on_key(plain(KeyCode::Right));
+
+        assert_eq!(app.buffer.as_ref().unwrap().cursor_col, 1, "the caret still moves");
+    }
+
+    /// Following a definition and coming back, in the same file and across
+    /// files; edits in hand are never put away to make a jump.
+    #[test]
+    fn definitions_are_followed_and_ctrl_o_comes_back() {
+        let mut app = lean_app("jump_here", "def a := 1\ndef b := a\n");
+
+        let here = app.buffer.as_ref().unwrap().path.clone();
+
+        app.buffer.as_mut().unwrap().move_to_pos(1, 9);
+
+        app.follow_definition(Some(lean::Place { path: here.clone(), line: 0, utf16_col: 4 }));
+
+        assert_eq!(app.buffer.as_ref().unwrap().char_idx(), 4, "on `a` in the same file");
+
+        app.on_key(ctrl(KeyCode::Char('o')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().char_idx(), 20, "back where it was");
+
+        // Another file.
+        let there = std::env::temp_dir().join("ocode_app_jump_there.lean");
+
+        fs::write(&there, "-- elsewhere\ndef c := 2\n").unwrap();
+
+        app.follow_definition(Some(lean::Place { path: there.clone(), line: 1, utf16_col: 4 }));
+
+        assert_eq!(app.buffer.as_ref().unwrap().path, there);
+
+        assert_eq!(app.buffer.as_ref().unwrap().char_idx(), 17);
+
+        app.on_key(ctrl(KeyCode::Char('o')));
+
+        assert_eq!(app.buffer.as_ref().unwrap().path, here);
+
+        assert_eq!(app.buffer.as_ref().unwrap().char_idx(), 20);
+
+        // With unsaved edits, the jump is refused rather than discarding them.
+        type_keys(&mut app, " ");
+
+        app.follow_definition(Some(lean::Place { path: there.clone(), line: 1, utf16_col: 4 }));
+
+        assert_eq!(app.buffer.as_ref().unwrap().path, here);
+
+        assert!(app.status.starts_with("Save first"), "{}", app.status);
+
+        let _ = fs::remove_file(there);
+    }
+
+    /// Ctrl+D against the real server: `Nat.succ` leads into Lean's own source,
+    /// opened read-only with the caret on the name, and Ctrl+O comes back.
+    /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_follows_a_definition_into_lean_itself() {
+        let mut app = lean_app("server_definition", "example (n : Nat) : Nat := Nat.succ n\n");
+
+        let home = app.buffer.as_ref().unwrap().path.clone();
+
+        app.buffer.as_mut().unwrap().move_to_pos(0, 31);
+
+        settle_goals(&mut app);
+
+        app.on_key(ctrl(KeyCode::Char('d')));
+
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        while app.buffer.as_ref().unwrap().path == home {
+            assert!(Instant::now() < deadline, "no jump; status: {}", app.status);
+
+            app.service_lean();
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert!(buf.path.ends_with("Init/Prelude.lean"), "{}", buf.path.display());
+
+        assert!(buf.read_only, "Lean's own source opens read-only");
+
+        let rest: String = buf.rope.slice(buf.char_idx()..).chars().take(4).collect();
+
+        assert_eq!(rest, "succ", "the caret is on the name");
+
+        app.on_key(ctrl(KeyCode::Char('o')));
+
+        let buf = app.buffer.as_ref().unwrap();
+
+        assert_eq!(buf.path, home);
+
+        assert_eq!(buf.char_idx(), 31);
+
+        assert!(!buf.read_only);
 
         app.stop_lean();
     }

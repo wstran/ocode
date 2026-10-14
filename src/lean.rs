@@ -61,6 +61,17 @@ pub struct Action {
     pub edits: Vec<(Range<usize>, String)>,
 }
 
+/// Where something is defined: a file, and a line and UTF-16 column in it,
+/// which only that file's text can turn into a char index.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Place {
+    pub path: PathBuf,
+
+    pub line: usize,
+
+    pub utf16_col: usize,
+}
+
 /// What Lean says about the caret.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AtCaret {
@@ -162,6 +173,13 @@ pub struct Session {
 
     /// The changes offered, until the caller takes them.
     actions: Option<Vec<Action>>,
+
+    /// The question about where the name at the caret is defined, in flight.
+    defining: Option<i64>,
+
+    /// Lean's answer to it, until the caller takes it: `None` when it knows of
+    /// no definition there.
+    definition: Option<Option<Place>>,
 }
 
 struct Doc {
@@ -224,6 +242,8 @@ impl Session {
             resolving: None,
             acting: None,
             actions: None,
+            defining: None,
+            definition: None,
         })
     }
 
@@ -393,6 +413,14 @@ impl Session {
 
                 if id.is_some() && id == self.acting {
                     return self.take_actions(&message["result"]);
+                }
+
+                if id.is_some() && id == self.defining {
+                    self.defining = None;
+
+                    self.definition = Some(place(&message["result"]));
+
+                    return true;
                 }
 
                 self.take_answer(id, &message)
@@ -662,6 +690,32 @@ impl Session {
         true
     }
 
+    /// Ask where the name at char `at` is defined.
+    pub fn ask_definition(&mut self, at: usize) {
+        let Some(doc) = self.doc.as_ref().filter(|doc| doc.opened) else {
+            return;
+        };
+
+        let (line, character) = position(&doc.synced, at.min(doc.synced.len_chars()));
+
+        let id = self.server.request(
+            "textDocument/definition",
+            json!({
+                "textDocument": { "uri": doc.uri },
+                "position": { "line": line, "character": character },
+            }),
+        );
+
+        self.defining = Some(id);
+
+        self.definition = None;
+    }
+
+    /// Lean's answer about a definition, once: taking it clears it.
+    pub fn take_found_definition(&mut self) -> Option<Option<Place>> {
+        self.definition.take()
+    }
+
     /// The changes Lean offered, once: taking them clears them.
     pub fn take_offered_actions(&mut self) -> Option<Vec<Action>> {
         self.actions.take()
@@ -769,6 +823,7 @@ impl Session {
             || self.completing.is_some()
             || self.resolving.is_some()
             || self.acting.is_some()
+            || self.defining.is_some()
             || self.doc.as_ref().is_some_and(|doc| !doc.processing.is_empty())
             || self.last_sent.is_some_and(|at| at.elapsed() < ANSWER_WINDOW)
     }
@@ -793,6 +848,43 @@ impl Session {
 
         self.server.stop();
     }
+}
+
+/// The first place in an answer to `textDocument/definition`, which may be a
+/// Location, a list of them, or a list of LocationLinks.
+fn place(result: &Value) -> Option<Place> {
+    let first = match result.as_array() {
+        Some(list) => list.first()?,
+
+        None => result,
+    };
+
+    let uri = first.get("targetUri").or_else(|| first.get("uri"))?.as_str()?;
+
+    let range = first.get("targetSelectionRange").or_else(|| first.get("range"))?;
+
+    Some(Place {
+        path: path_of(uri)?,
+        line: range["start"]["line"].as_u64()? as usize,
+        utf16_col: range["start"]["character"].as_u64()? as usize,
+    })
+}
+
+/// The path a `file://` URI names.
+fn path_of(uri: &str) -> Option<PathBuf> {
+    let encoded = uri.strip_prefix("file://")?;
+
+    Some(PathBuf::from(String::from_utf8_lossy(&decode(encoded)).into_owned()))
+}
+
+/// The char index of a place's position in its own file's text.
+pub fn char_at(text: &Rope, place: &Place) -> usize {
+    char_index(text, place.line, place.utf16_col)
+}
+
+/// Whether `path` lies inside the project `root`, comparing real paths.
+pub fn inside(root: &Path, path: &Path) -> bool {
+    canonical(path).starts_with(canonical(root))
 }
 
 /// A code action Lean offered, as edits to the open file. One without an edit
@@ -1122,6 +1214,8 @@ mod tests {
             resolving: None,
             acting: None,
             actions: None,
+            defining: None,
+            definition: None,
         };
 
         session.open(Path::new("/nonexistent/Test.lean"), &Rope::from_str(text));
@@ -1311,6 +1405,32 @@ mod tests {
         assert_eq!(action(doc, &changes).map(|a| a.edits.len()), Some(1), "the older `changes` form");
 
         assert_eq!(action(doc, &json!({ "title": "needs resolving", "data": {} })), None);
+    }
+
+    /// The definition answer Lean 4.35 gave for `Nat.succ`, and the other
+    /// shapes LSP allows.
+    #[test]
+    fn a_definition_reads_from_every_shape() {
+        let link = json!([{
+            "originSelectionRange": { "start": { "line": 0, "character": 27 }, "end": { "line": 0, "character": 35 } },
+            "targetRange": { "start": { "line": 1364, "character": 2 }, "end": { "line": 1370, "character": 24 } },
+            "targetSelectionRange": { "start": { "line": 1370, "character": 4 }, "end": { "line": 1370, "character": 8 } },
+            "targetUri": "file:///home/dev/.elan/toolchains/leanprover--lean4---v4.35.0/src/lean/Init/Prelude.lean",
+        }]);
+
+        let found = place(&link).unwrap();
+
+        assert!(found.path.ends_with("src/lean/Init/Prelude.lean"));
+
+        assert_eq!((found.line, found.utf16_col), (1370, 4), "the name itself, not the whole declaration");
+
+        let location = json!({ "uri": "file:///p/To%C3%A1n%20h%E1%BB%8Dc/A.lean", "range": { "start": { "line": 2, "character": 0 }, "end": { "line": 2, "character": 1 } } });
+
+        assert_eq!(place(&location).map(|p| p.path), Some(PathBuf::from("/p/Toán học/A.lean")));
+
+        assert_eq!(place(&Value::Null), None);
+
+        assert_eq!(place(&json!([])), None);
     }
 
     #[test]

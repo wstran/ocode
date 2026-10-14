@@ -78,6 +78,7 @@ application. Hold `Shift` with any motion to select instead of move.
 | `Ctrl+G` | Lean: show or hide the goals panel |
 | `Ctrl+Space` | Lean: offer names to complete the word (it also opens by itself) |
 | `Ctrl+T` | Lean: apply the suggestion on this line, from `exact?`, `apply?` or `simp?` |
+| `Ctrl+D` / `F12` · `Ctrl+O` | Lean: go to the definition of the name at the caret · come back |
 | `Ctrl+Q` | Quit |
 | `Esc` | Step back one layer: clear the selection, else hide the tree, else open it to pick another file. Again with nothing left to do quits |
 
@@ -220,6 +221,15 @@ Lines Lean is still checking are marked `│`. The server starts when a Lean fil
 opens and stops when it closes: `lake serve` inside a Lake project, so imports
 such as Mathlib resolve, or `lean --server` for a file on its own. Lean works
 while it checks; `ocode` only wakes to show what it found.
+
+**Go to definition.** `Ctrl+D` (or `F12`) opens the definition of the name
+under the caret, in your project, in Mathlib or in Lean itself, and `Ctrl+O`
+comes back, as many steps as you went. A file outside your project opens
+read-only, marked `[READ]`, so a proof in Mathlib can be read, its goals
+stepped through and its names followed further, but not changed by accident.
+It is checked by the server already running rather than a new one started in
+the library's folder. With unsaved edits, `ocode` asks you to save before
+opening another file rather than putting them away.
 
 **Try this.** Ask Lean to finish a step with `exact?`, `apply?` or `simp?`,
 and it answers with a suggestion on that line, which the status bar and the

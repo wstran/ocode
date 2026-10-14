@@ -1220,7 +1220,13 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
             vec![(format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), warn)],
         )
     } else if let Some(buf) = &app.buffer {
-        let focus = if app.focus == Focus::Tree { "TREE" } else { "EDIT" };
+        let focus = match app.focus {
+            Focus::Tree => "TREE",
+
+            Focus::Editor if buf.read_only => "READ",
+
+            Focus::Editor => "EDIT",
+        };
 
         let mut left = vec![
             (format!(" [{focus}] "), badge),

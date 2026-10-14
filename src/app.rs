@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use crate::abbrev;
 use crate::buffer::{self, Buffer, DiskEvent};
 use crate::highlight::SyntaxHighlighter;
+use crate::lean;
 use crate::media::{self, Loaded, Media};
 use crate::tree::FileTree;
 
@@ -133,6 +134,13 @@ pub struct App {
     clipboard: Option<arboard::Clipboard>,
 
     clip_internal: String,
+
+    /// Lean's server, while a Lean file is open and Lean is installed.
+    pub lean: Option<lean::Session>,
+
+    /// The Lean file the server could not be started for, so it is not tried
+    /// again on every turn of the loop.
+    lean_failed: Option<PathBuf>,
 }
 
 impl App {
@@ -204,6 +212,8 @@ impl App {
             tree_click: None,
             clipboard: arboard::Clipboard::new().ok(),
             clip_internal: String::new(),
+            lean: None,
+            lean_failed: None,
         })
     }
 
@@ -873,6 +883,10 @@ impl App {
     }
 
     fn open_file(&mut self, path: PathBuf, keep_tree: bool) {
+        // Opening a file again is the way to retry Lean after fixing whatever
+        // stopped it.
+        self.lean_failed = None;
+
         let loaded = match media::classify(&path) {
             Ok(Loaded::Text) => {
                 let syntax = self.highlighter.syntax_name_for_path(&path);
@@ -1029,7 +1043,97 @@ impl App {
             wake = Some(wake.map_or(poll, |w| w.min(poll)));
         }
 
+        // Quickly while Lean is working, so its results show as they come; an
+        // idle server costs nothing.
+        if self.lean.as_ref().is_some_and(|s| s.busy()) {
+            let poll = Duration::from_millis(50);
+
+            wake = Some(wake.map_or(poll, |w| w.min(poll)));
+        }
+
         wake
+    }
+
+    /// Keep Lean's server in step with the open file: start it for a Lean file,
+    /// hand it the edits, take in what it reports, and stop it once no Lean
+    /// file is open. Runs once per turn of the main loop, never from `new`, so
+    /// building an `App` (as every test does) starts no process.
+    pub fn service_lean(&mut self) {
+        let Some(path) = self.buffer.as_ref().filter(|b| b.is_lean()).map(|b| b.path.clone()) else {
+            self.stop_lean();
+
+            return;
+        };
+
+        let attached = self.lean.as_ref().and_then(|s| s.path()) == Some(path.as_path());
+
+        if !attached && self.lean_failed.as_ref() != Some(&path) {
+            self.attach_lean(&path);
+        }
+
+        let Some(session) = self.lean.as_mut() else {
+            return;
+        };
+
+        if let Some(buf) = self.buffer.as_ref() {
+            // A half-typed `\forall` is not worth checking: the server would
+            // flash an error for every letter of it.
+            if buf.abbrev.is_none() {
+                session.sync(&buf.rope);
+            }
+        }
+
+        if session.pump().is_err() {
+            let why = session.last_log().unwrap_or_else(|| "no reason given".to_string());
+
+            self.lean = None;
+
+            self.lean_failed = Some(path);
+
+            self.set_error(format!("Lean stopped: {why}"));
+        }
+    }
+
+    /// Point the server at `path`, starting one in its project if the running
+    /// one belongs to another.
+    fn attach_lean(&mut self, path: &std::path::Path) {
+        let root = lean::root_of(path);
+
+        if self.lean.as_ref().is_some_and(|s| s.root() != root) {
+            self.stop_lean();
+        }
+
+        if self.lean.is_none() {
+            match lean::Session::start(path) {
+                Ok(session) => self.lean = Some(session),
+
+                Err(why) => {
+                    self.lean_failed = Some(path.to_path_buf());
+
+                    self.set_error(match why {
+                        lean::Unavailable::NotInstalled => {
+                            "Lean is not installed: errors and goals need elan (see the README)".to_string()
+                        }
+
+                        lean::Unavailable::Spawn(e) => format!("Lean could not start: {e}"),
+                    });
+
+                    return;
+                }
+            }
+        }
+
+        if let (Some(session), Some(buf)) = (self.lean.as_mut(), self.buffer.as_ref()) {
+            session.open(path, &buf.rope);
+        }
+    }
+
+    /// Stop Lean's server, if one is running. Quitting calls this so no server
+    /// outlives the editor.
+    pub fn stop_lean(&mut self) {
+        if let Some(session) = self.lean.take() {
+            session.stop();
+        }
     }
 
     /// Idle housekeeping done when the loop wakes without a keypress.
@@ -2866,5 +2970,47 @@ mod tests {
         type_keys(&mut app, "\\forall \\a ");
 
         assert_eq!(text_of(&app), "\\forall \\a ");
+    }
+
+    /// The whole path a user sees: the loop's `service_lean`, then a render.
+    /// Run with Lean installed: `cargo test --bin ocode -- --ignored lean_server`
+    #[test]
+    #[ignore = "needs a Lean toolchain"]
+    fn lean_server_errors_reach_the_gutter_and_status_bar() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = lean_app("server_ui", "example : 1 = 2 := by rfl\n");
+
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        while app.lean.as_ref().is_none_or(|s| s.diagnostics().is_empty() || s.checking()) {
+            assert!(Instant::now() < deadline, "no diagnostics arrived; status: {}", app.status);
+
+            app.service_lean();
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // Put the caret on the failing tactic.
+        for _ in 0.."example : 1 = 2 := by ".len() {
+            app.on_key(plain(KeyCode::Right));
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(110, 4)).unwrap();
+
+        terminal.draw(|frame| crate::ui::render(frame, &mut app)).unwrap();
+
+        let screen = terminal.backend().buffer().clone();
+
+        let row = |y: u16| (0..110).map(|x| screen.cell((x, y)).unwrap().symbol().to_string()).collect::<String>();
+
+        assert!(row(0).starts_with("  1● example"), "the gutter marks the line: {:?}", row(0));
+
+        assert!(row(3).contains("error: Tactic `rfl` failed"), "the status bar says why: {:?}", row(3));
+
+        app.stop_lean();
+
+        assert!(app.lean.is_none());
     }
 }

@@ -201,6 +201,15 @@ hypothesis names they often share, like `left` and `right`. Nested and doc
 comments, char literals, raw and interpolated strings and `«quoted»` names read
 the way Lean reads them.
 
+**Errors as you type.** With Lean installed, `ocode` runs Lean's own server
+for the open file, the same one the official editors use. A line with an error
+or a warning gets a red or amber `●` beside its number, the exact spot is
+underlined in that colour, and the status bar says what is wrong at the caret.
+Lines Lean is still checking are marked `│`. The server starts when a Lean file
+opens and stops when it closes: `lake serve` inside a Lake project, so imports
+such as Mathlib resolve, or `lean --server` for a file on its own. Lean works
+while it checks; `ocode` only wakes to show what it found.
+
 **Unicode input.** Type `\` and a name, and the symbol takes its place as you
 type, with the same abbreviations as the official Lean editors:
 
@@ -223,6 +232,14 @@ gives a backslash. Undo brings back what you typed.
 The status bar says what the abbreviation will become and what else it could.
 With the caret on a symbol, it shows how to type that symbol, so a proof you
 are reading teaches you how to write the next one.
+
+To get Lean, install [elan](https://github.com/leanprover/elan), its version
+manager, which puts `lean` and `lake` in `~/.elan/bin`. `ocode` looks there as
+well as on your `PATH`:
+
+```sh
+curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
+```
 
 ## Images, binaries and metadata
 

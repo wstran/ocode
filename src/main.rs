@@ -4,6 +4,8 @@ mod buffer;
 mod comment;
 mod config;
 mod highlight;
+mod lean;
+mod lsp;
 mod media;
 mod meta;
 mod shot;
@@ -74,6 +76,8 @@ fn main() -> Result<()> {
 
     restore_terminal(&mut terminal)?;
 
+    app.stop_lean();
+
     result
 }
 
@@ -83,6 +87,8 @@ fn run(terminal: &mut Tui, app: &mut App) -> Result<()> {
     let mut shown: Painted = None;
 
     loop {
+        app.service_lean();
+
         terminal.draw(|frame| ui::render(frame, app))?;
 
         if app.should_quit {

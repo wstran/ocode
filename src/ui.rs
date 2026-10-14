@@ -8,6 +8,7 @@ use crate::abbrev;
 use crate::app::{App, Focus};
 use crate::buffer::{self, Buffer};
 use crate::highlight::UiPalette;
+use crate::lean::{Diagnostic, Severity};
 use crate::media::{self, Media};
 
 const TREE_WIDTH: u16 = 32;
@@ -380,6 +381,8 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
         return;
     };
 
+    let lean = app.lean.as_ref();
+
     let height = area.height as usize;
 
     let width = area.width as usize;
@@ -394,7 +397,11 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
     let num_w = total.to_string().len().max(3);
 
-    let gutter_w = num_w + 1;
+    // A Lean file keeps a column after the number for the mark of a
+    // diagnostic, always, so the code never shifts when one comes or goes.
+    let mark_w = usize::from(buf.is_lean());
+
+    let gutter_w = num_w + mark_w + 1;
 
     let text_width = width.saturating_sub(gutter_w);
 
@@ -416,6 +423,17 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
 
     let last = buf.last_line();
 
+    // Lean's diagnostics with the lines they span, worked out once a frame.
+    // Positions are clamped: the text may have shrunk since they were sent.
+    let len = buf.rope.len_chars();
+
+    let diagnostics: Vec<(usize, usize, &Diagnostic)> = lean
+        .map(|s| s.diagnostics())
+        .unwrap_or_default()
+        .iter()
+        .map(|d| (buf.rope.char_to_line(d.start.min(len)), buf.rope.char_to_line(d.end.min(len)), d))
+        .collect();
+
     for row in 0..height {
         let li = buf.scroll_row + row;
 
@@ -429,9 +447,31 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
             Style::default().fg(pal.dim)
         };
 
-        let gutter = Span::styled(format!("{:>w$} ", li + 1, w = num_w), num_style);
+        let gutter = Span::styled(format!("{:>w$}", li + 1, w = num_w), num_style);
+
+        // The mark column shows the line's worst diagnostic, or that Lean is
+        // still checking it.
+        let worst = diagnostics
+            .iter()
+            .filter(|(first, last, _)| (*first..=*last).contains(&li))
+            .map(|(_, _, d)| d.severity)
+            .min();
+
+        let marker = match worst {
+            Some(severity) => Span::styled("●", Style::default().fg(severity_colour(severity))),
+
+            None if lean.is_some_and(|s| s.is_processing(li)) => Span::styled("│", Style::default().fg(pal.dim)),
+
+            None => Span::raw(" "),
+        };
 
         let mut spans = vec![gutter];
+
+        if mark_w > 0 {
+            spans.push(marker);
+        }
+
+        spans.push(Span::raw(" "));
 
         let sel = buf.selection_for_line(li);
 
@@ -454,21 +494,38 @@ fn render_editor(frame: &mut Frame, app: &mut App, area: Rect, pal: UiPalette) {
             buffer::match_columns(&text, &query)
         };
 
+        let line_start = buf.rope.line_to_char(li);
+
+        let line_end = line_start + buf.line_len(li);
+
+        // Each diagnostic is underlined in its colour, a zero-width one under
+        // the character it points at.
+        let mut underlines: Vec<(usize, usize, Option<Color>)> = diagnostics
+            .iter()
+            .filter(|(first, last, _)| (*first..=*last).contains(&li))
+            .map(|(_, _, d)| {
+                let start = d.start.clamp(line_start, line_end) - line_start;
+
+                let end = d.end.clamp(line_start, line_end) - line_start;
+
+                (start, end.max(start + 1), Some(severity_colour(d.severity)))
+            })
+            .collect();
+
         // A Lean abbreviation being typed is underlined until it is replaced,
         // the way Lean's own editors mark it. It never spans a line break.
-        let underline = buf.abbrev.as_ref().and_then(|tracked| {
-            let line_start = buf.rope.line_to_char(li);
-
-            (tracked.start >= line_start && tracked.end() <= line_start + buf.line_len(li))
-                .then(|| (tracked.start - line_start, tracked.end() - line_start))
-        });
+        if let Some(tracked) = &buf.abbrev {
+            if tracked.start >= line_start && tracked.end() <= line_end {
+                underlines.push((tracked.start - line_start, tracked.end() - line_start, None));
+            }
+        }
 
         let marks = Marks {
             selection: sel,
             selection_bg: pal.selection,
             hits: &hits,
             hit_bg: pal.search_match,
-            underline,
+            underlines,
         };
 
         if let Some(cached) = buf.hl.line(li) {
@@ -676,6 +733,10 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
             right.push((format!("{hint}   "), text));
         }
 
+        if let Some(seg) = lean_status(app, buf, dim) {
+            right.push(seg);
+        }
+
         right.push((format!("Ln {}, Col {} ", buf.cursor_line + 1, buf.cursor_col + 1), dim));
 
         (left, right)
@@ -722,6 +783,74 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, pal: UiPalette) {
     };
 
     frame.render_widget(Paragraph::new(compose_bar(&left, &right, width)), area);
+}
+
+fn severity_colour(severity: Severity) -> Color {
+    match severity {
+        Severity::Error => ERR,
+
+        Severity::Warning => WARN,
+
+        Severity::Information | Severity::Hint => ACCENT,
+    }
+}
+
+/// What Lean has to say at the cursor: the diagnostic under it (or else on its
+/// line), first line only, or that the server is starting or still checking.
+fn lean_status(app: &App, buf: &Buffer, dim: Style) -> Option<Seg> {
+    let session = app.lean.as_ref()?;
+
+    if session.starting() {
+        let doing = session.last_log().map(|l| format!(": {}", clip(&l, 40))).unwrap_or_default();
+
+        return Some((format!("Lean starting{doing}   "), dim));
+    }
+
+    let at = buf.char_idx();
+
+    let line = buf.cursor_line;
+
+    let len = buf.rope.len_chars();
+
+    let here = session
+        .diagnostics()
+        .iter()
+        .filter(|d| d.start <= at && at <= d.end)
+        .min_by_key(|d| d.severity)
+        .or_else(|| {
+            session.diagnostics().iter().filter(|d| buf.rope.char_to_line(d.start.min(len)) == line).min_by_key(|d| d.severity)
+        });
+
+    if let Some(d) = here {
+        let label = match d.severity {
+            Severity::Error => "error",
+
+            Severity::Warning => "warning",
+
+            Severity::Information => "info",
+
+            Severity::Hint => "hint",
+        };
+
+        let first = d.message.lines().next().unwrap_or_default();
+
+        return Some((format!("{label}: {}   ", clip(first, 70)), Style::default().fg(severity_colour(d.severity))));
+    }
+
+    session.checking().then(|| ("checking…   ".to_string(), dim))
+}
+
+/// At most `max` chars of `text`, marking a cut with an ellipsis.
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+
+    let mut cut: String = text.chars().take(max.saturating_sub(1)).collect();
+
+    cut.push('…');
+
+    cut
 }
 
 /// Green for a success flash, red for a lingering error (see `App::flash` /
@@ -835,13 +964,14 @@ struct Marks<'a> {
 
     hit_bg: Color,
 
-    underline: Option<(usize, usize)>,
+    /// Column ranges to underline, in a colour of their own or the text's.
+    underlines: Vec<(usize, usize, Option<Color>)>,
 }
 
 /// Take the slice of highlighted spans visible in `[start, start + width)`
 /// display columns, expanding tabs to a single space so columns stay aligned
 /// with the cursor (which counts one column per char), and apply `marks`: the
-/// selection background, the search-match tint and the abbreviation underline.
+/// selection background, the search-match tint and the underlines.
 fn slice_spans(spans: &[(Style, String)], start: usize, width: usize, marks: &Marks) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
 
@@ -874,8 +1004,14 @@ fn slice_spans(spans: &[(Style, String)], start: usize, width: usize, marks: &Ma
                     *style
                 };
 
-                if marks.underline.is_some_and(|(a, b)| col >= a && col < b) {
-                    cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
+                for (a, b, colour) in &marks.underlines {
+                    if col >= *a && col < *b {
+                        cell_style = cell_style.add_modifier(Modifier::UNDERLINED);
+
+                        if let Some(colour) = colour {
+                            cell_style = cell_style.underline_color(*colour);
+                        }
+                    }
                 }
 
                 if chunk_style != Some(cell_style) {
@@ -948,10 +1084,11 @@ mod tests {
 
         let underlined = |x: u16| screen.cell((x, 0)).unwrap().modifier.contains(Modifier::UNDERLINED);
 
-        // A three-digit gutter and a space put column 0 of the text at x = 4.
-        assert!((6..9).all(underlined), "\\al is underlined");
+        // A three-digit number, the mark column of a Lean file and a space put
+        // column 0 of the text at x = 5.
+        assert!((7..10).all(underlined), "\\al is underlined");
 
-        assert!(!underlined(4) && !underlined(5) && !underlined(9), "and nothing else is");
+        assert!(!underlined(5) && !underlined(6) && !underlined(10), "and nothing else is");
 
         let status: String = (0..100).map(|x| screen.cell((x, 4)).unwrap().symbol().to_string()).collect();
 

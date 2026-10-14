@@ -51,6 +51,9 @@ const EDITOR_SCROLL_STEP: isize = 3;
 /// emits a burst of events per gesture, and a bigger step makes the list bolt.
 const TREE_SCROLL_STEP: isize = 1;
 
+/// How to install Lean, short enough for the status bar and to copy from it.
+pub const INSTALL_LEAN: &str = "brew install elan-init && elan default stable";
+
 /// A dependency's or a toolchain's Lean source is read, never edited, however
 /// it was reached: from the command line, the tree or a definition.
 fn mark_dependency(buf: &mut Buffer) {
@@ -169,6 +172,9 @@ pub struct App {
     /// again on every turn of the loop.
     lean_failed: Option<PathBuf>,
 
+    /// Lean was looked for and is not installed: the panel says how to get it.
+    pub lean_missing: bool,
+
     /// Whether the goals panel is shown beside a Lean file (Ctrl+G).
     pub infoview: bool,
 
@@ -281,6 +287,7 @@ impl App {
             clip_internal: String::new(),
             lean: None,
             lean_failed: None,
+            lean_missing: false,
             infoview: true,
             infoview_area: None,
             infoview_scroll: 0,
@@ -1305,15 +1312,19 @@ impl App {
 
         if self.lean.is_none() {
             match lean::Session::start(path) {
-                Ok(session) => self.lean = Some(session),
+                Ok(session) => {
+                    self.lean = Some(session);
+
+                    self.lean_missing = false;
+                }
 
                 Err(why) => {
                     self.lean_failed = Some(path.to_path_buf());
 
+                    self.lean_missing = matches!(why, lean::Unavailable::NotInstalled);
+
                     self.set_error(match why {
-                        lean::Unavailable::NotInstalled => {
-                            "Lean is not installed: errors and goals need elan (see the README)".to_string()
-                        }
+                        lean::Unavailable::NotInstalled => format!("Lean is not installed: {}", INSTALL_LEAN),
 
                         lean::Unavailable::Spawn(e) => format!("Lean could not start: {e}"),
                     });

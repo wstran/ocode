@@ -115,9 +115,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 /// The goals panel's width, when it is shown: beside a Lean file whose server
 /// runs, unless the code would be left too narrow to work in.
 fn infoview_width(app: &App, available: u16) -> Option<u16> {
-    let lean_file = app.media.is_none() && app.buffer.as_ref().is_some_and(|b| b.is_lean());
+    let lean_file = app.media.is_none() && app.buffer.as_ref().is_some_and(|b| b.is_lean() && !b.read_only);
 
-    (app.infoview && lean_file && app.lean_here().is_some() && available >= 72)
+    // With no Lean to run, the panel is where it says how to get it.
+    let something_to_say = app.lean_here().is_some() || app.lean_missing;
+
+    (app.infoview && lean_file && something_to_say && available >= 72)
         .then(|| (available * 2 / 5).clamp(30, 64))
 }
 
@@ -177,6 +180,10 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
     let dim = Style::default().fg(pal.dim);
 
     let mut out: Vec<Line<'static>> = Vec::new();
+
+    if app.lean_here().is_none() && app.lean_missing {
+        return install_lines(width, heading, dim, Style::default().fg(pal.fg));
+    }
 
     let (Some(session), Some(buf)) = (app.lean_here(), app.buffer.as_ref()) else {
         return out;
@@ -296,6 +303,30 @@ fn infoview_lines(app: &App, width: usize, pal: UiPalette) -> Vec<Line<'static>>
 
         out.extend(wrap(&[(dim, hint.to_string())], width));
     }
+
+    out
+}
+
+/// What the panel says when Lean is not installed: what it would add, and the
+/// two commands that get it, each on a line of its own so it can be copied.
+fn install_lines(width: usize, heading: Style, dim: Style, text: Style) -> Vec<Line<'static>> {
+    let mut out = vec![Line::styled("Lean is not installed", heading)];
+
+    let prose = |out: &mut Vec<Line<'static>>, words: &str, style: Style| {
+        out.extend(wrap_words(words, width).into_iter().map(|row| Line::styled(row, style)));
+    };
+
+    prose(&mut out, "Errors, goals, names and suggestions here come from Lean itself, which is installed on its own. In a terminal:", text);
+
+    out.push(Line::default());
+
+    for command in ["brew install elan-init", "elan default stable"] {
+        out.push(Line::styled(format!("  {command}"), Style::default().fg(ACCENT)));
+    }
+
+    out.push(Line::default());
+
+    prose(&mut out, "then open this file again. The README has Lean's own installer, and how to start a project with Mathlib.", dim);
 
     out
 }
@@ -1425,10 +1456,14 @@ fn compose_bar(left: &[Seg], right: &[Seg], width: usize) -> Line<'static> {
         }
 
         spans.push(Span::raw(" ".repeat(avail - left_len)));
-    } else if avail > 0 {
+    } else if avail > 1 {
+        // Cut from the head, keeping a space before the right side so the two
+        // never run together.
         spans.push(Span::raw("…"));
 
-        spans.extend(tail_spans(left, avail - 1));
+        spans.extend(tail_spans(left, avail - 2));
+
+        spans.push(Span::raw(" "));
     }
 
     spans.extend(tail_spans(right, right_w));
@@ -1622,6 +1657,45 @@ mod tests {
         assert!(text.ends_with("import Init.Prelude"), "emphasis stars go: {text}");
 
         assert!(!lines.windows(2).any(|w| w[0].is_empty() && w[1].is_empty()), "no stacked blank lines: {lines:#?}");
+    }
+
+    /// A left side too long for the bar is cut from its head and still keeps a
+    /// space before the right side.
+    #[test]
+    fn a_cut_status_keeps_a_gap_before_the_right_side() {
+        use ratatui::style::Style;
+
+        let left = vec![("a long message that cannot fit".to_string(), Style::default())];
+
+        let right = vec![("Ln 1, Col 1 ".to_string(), Style::default())];
+
+        let line = super::compose_bar(&left, &right, 30).to_string();
+
+        assert_eq!(line.chars().count(), 30);
+
+        assert!(line.ends_with(" Ln 1, Col 1 ") && line.starts_with('…'), "{line:?}");
+    }
+
+    /// With no Lean installed, a Lean file's panel says how to get it.
+    #[test]
+    fn a_lean_file_without_lean_says_how_to_install_it() {
+        let path = std::env::temp_dir().join("ocode_render_no_lean.lean");
+
+        fs::write(&path, "theorem t : True := trivial\n").unwrap();
+
+        let mut app = App::new(path.clone(), false).unwrap();
+
+        app.picker = None;
+
+        app.lean_missing = true;
+
+        let screen = render_to_string(&mut app, 120, 16);
+
+        assert!(screen.contains("Lean is not installed"), "{screen}");
+
+        assert!(screen.contains("brew install elan-init") && screen.contains("elan default stable"), "{screen}");
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

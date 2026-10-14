@@ -270,13 +270,42 @@ The status bar says what the abbreviation will become and what else it could.
 With the caret on a symbol, it shows how to type that symbol, so a proof you
 are reading teaches you how to write the next one.
 
-To get Lean, install [elan](https://github.com/leanprover/elan), its version
-manager, which puts `lean` and `lake` in `~/.elan/bin`. `ocode` looks there as
-well as on your `PATH`:
+### Getting Lean, and Mathlib
+
+Lean is installed on its own; `ocode` finds it and starts it for you. Without
+it, a Lean file still gets the colours and the symbols, and the panel says how
+to install it. Install [elan](https://github.com/leanprover/elan), Lean's
+version manager, either with its official installer, which also makes the
+latest stable Lean the default:
 
 ```sh
 curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh
 ```
+
+or with Homebrew, which does not choose a default, so name one:
+
+```sh
+brew install elan-init
+elan default stable
+```
+
+`ocode` looks for `lake` and `lean` on your `PATH` and in `~/.elan/bin`, so a
+terminal opened before the install still finds them.
+
+For mathematics you want [Mathlib](https://github.com/leanprover-community/mathlib4).
+Make a project for it the way Mathlib recommends, then open it:
+
+```sh
+lake +leanprover-community/mathlib4:lean-toolchain new my_maths math
+ocode my_maths
+```
+
+The first command fetches Mathlib already built, which saves hours of
+compiling: on the machine this was written on, 9,031 files and 7.2 GB under
+the project's `.lake` folder, in a few minutes. Start each file with
+`import Mathlib`. The first time a file is opened, Lean takes a while to load
+Mathlib (25 seconds there, 12 on later opens); the panel says it is checking
+until it is done.
 
 ## Images, binaries and metadata
 

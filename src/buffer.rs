@@ -174,9 +174,13 @@ impl Buffer {
     /// The selected char range `(start, end)` with `start <= end`, or `None`
     /// when there is no selection (no anchor, or anchor == cursor).
     pub fn selection(&self) -> Option<(usize, usize)> {
-        let anchor = self.anchor?;
+        // Kept inside the text even if an edit forgot to drop the anchor:
+        // a selection past the end would crash the next delete.
+        let len = self.rope.len_chars();
 
-        let cursor = self.cursor_idx();
+        let anchor = self.anchor?.min(len);
+
+        let cursor = self.cursor_idx().min(len);
 
         if anchor == cursor {
             None
@@ -290,6 +294,15 @@ impl Buffer {
     /// where the last edit left it) and not forced to break — so a new word, a
     /// cursor jump or a structural edit each start a fresh undo step.
     fn record(&mut self, kind: EditKind, pos: usize, force_break: bool) {
+        // An anchor with nothing selected is left by a Shift+motion that did
+        // not move. Every edit records itself here first, and once the edit
+        // lands the anchor would point at shifted text, even past the end, so
+        // a later Shift+motion would select from nowhere and the next delete
+        // crash. Drop it now; an edit over a real selection keeps its anchor.
+        if self.selection().is_none() {
+            self.anchor = None;
+        }
+
         let coalesce = !force_break
             && kind != EditKind::Other
             && self.last_edit == Some(kind)
@@ -489,21 +502,52 @@ impl Buffer {
         self.rope.len_lines().saturating_sub(1)
     }
 
-    /// Length of a line in chars, excluding the trailing line break.
+    /// Length of a line in chars, excluding the trailing line break: any that
+    /// ropey ends a line on, so a caret never sits inside one.
     pub fn line_len(&self, line: usize) -> usize {
         let slice = self.rope.line(line);
 
-        let mut len = slice.len_chars();
+        let len = slice.len_chars();
 
-        if len > 0 && slice.char(len - 1) == '\n' {
-            len -= 1;
+        match (len.checked_sub(2).map(|i| slice.char(i)), len.checked_sub(1).map(|i| slice.char(i))) {
+            (Some('\r'), Some('\n')) => len - 2,
 
-            if len > 0 && slice.char(len - 1) == '\r' {
-                len -= 1;
-            }
+            (_, Some(c)) if is_line_break(c) => len - 1,
+
+            _ => len,
         }
+    }
 
-        len
+    /// How many chars the line break ending just before `idx` takes: two for
+    /// `\r\n`, which is one break and must go as one.
+    fn break_before(&self, idx: usize) -> usize {
+        let crlf = idx >= 2 && self.rope.char(idx - 2) == '\r' && self.rope.char(idx - 1) == '\n';
+
+        if crlf { 2 } else { 1 }
+    }
+
+    /// The line break this file uses where the caret is, so Enter never mixes
+    /// `\n` into a `\r\n` file: the current line's own, else the one above's.
+    fn line_ending_here(&self) -> &'static str {
+        let ending = |line: usize| {
+            let slice = self.rope.line(line);
+
+            let len = slice.len_chars();
+
+            match (len.checked_sub(2).map(|i| slice.char(i)), len.checked_sub(1).map(|i| slice.char(i))) {
+                (Some('\r'), Some('\n')) => Some("\r\n"),
+
+                (_, Some('\n')) => Some("\n"),
+
+                (_, Some('\r')) => Some("\r"),
+
+                _ => None,
+            }
+        };
+
+        ending(self.cursor_line)
+            .or_else(|| self.cursor_line.checked_sub(1).and_then(ending))
+            .unwrap_or("\n")
     }
 
     fn cursor_idx(&self) -> usize {
@@ -999,19 +1043,15 @@ impl Buffer {
 
         let indent = self.current_indent();
 
-        self.rope.insert_char(idx, '\n');
+        let ending = self.line_ending_here();
 
-        if !indent.is_empty() {
-            self.rope.insert(idx + 1, &indent);
-        }
+        self.rope.insert(idx, &format!("{ending}{indent}"));
 
         self.hl.invalidate(self.cursor_line);
 
-        self.cursor_line += 1;
-
-        self.cursor_col = indent.chars().count();
-
-        self.desired_col = self.cursor_col;
+        // From the text, not by counting lines: a break typed after a lone `\r`
+        // joins it into one `\r\n` rather than adding a line.
+        self.move_to_char(idx + ending.len() + indent.chars().count());
 
         self.refresh_modified();
 
@@ -1031,27 +1071,15 @@ impl Buffer {
 
         self.record(EditKind::Delete, idx, false);
 
-        if self.cursor_col > 0 {
-            self.rope.remove(idx - 1..idx);
+        // At a line start the break before goes whole: `\r\n` is one break,
+        // and taking only its `\n` would leave a lone `\r` that still ends a line.
+        let width = if self.cursor_col > 0 { 1 } else { self.break_before(idx) };
 
-            self.cursor_col -= 1;
+        self.rope.remove(idx - width..idx);
 
-            self.hl.invalidate(self.cursor_line);
-        } else {
-            let prev = self.cursor_line - 1;
+        self.move_to_char(idx - width);
 
-            let prev_len = self.line_len(prev);
-
-            self.rope.remove(idx - 1..idx);
-
-            self.cursor_line = prev;
-
-            self.cursor_col = prev_len;
-
-            self.hl.invalidate(prev);
-        }
-
-        self.desired_col = self.cursor_col;
+        self.hl.invalidate(self.cursor_line);
 
         self.refresh_modified();
 
@@ -1068,7 +1096,12 @@ impl Buffer {
         if idx < self.rope.len_chars() {
             self.record(EditKind::Delete, idx, false);
 
-            self.rope.remove(idx..idx + 1);
+            // A `\r\n` ahead is one break and goes whole.
+            let crlf = idx + 2 <= self.rope.len_chars() && self.break_before(idx + 2) == 2;
+
+            let width = if crlf { 2 } else { 1 };
+
+            self.rope.remove(idx..idx + width);
 
             self.hl.invalidate(self.cursor_line);
 
@@ -1193,6 +1226,13 @@ impl Buffer {
     }
 
     pub fn delete_word_left(&mut self) {
+        // With a selection, it goes, as with a plain Backspace. Deleting the
+        // word instead left the selection's anchor pointing past the text,
+        // and the next delete then crashed.
+        if self.delete_selection() {
+            return;
+        }
+
         let end = self.cursor_idx();
 
         let start = self.word_left_from(end);
@@ -1216,6 +1256,10 @@ impl Buffer {
 
     /// Delete from the cursor to the end of the word ahead (forward word delete).
     pub fn delete_word_right(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+
         let start = self.cursor_idx();
 
         let end = self.word_right_from(start);
@@ -1332,6 +1376,13 @@ impl Buffer {
         i
     }
 
+    /// The selection's anchor as stored, before `selection` keeps it inside
+    /// the text, so a test can catch an edit that forgot to move or drop it.
+    #[cfg(test)]
+    pub fn raw_anchor(&self) -> Option<usize> {
+        self.anchor
+    }
+
     pub fn file_name(&self) -> String {
         self.path
             .file_name()
@@ -1406,6 +1457,13 @@ fn char_class(c: char) -> u8 {
     } else {
         2
     }
+}
+
+/// The chars ropey ends a line on, besides `\r\n`: with its default features
+/// it also breaks on a lone `\r`, vertical tab, form feed, NEL and the Unicode
+/// line and paragraph separators.
+fn is_line_break(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 
 fn is_word_char(c: char) -> bool {
@@ -1680,6 +1738,131 @@ mod tests {
         b.undo();
 
         assert_eq!(b.rope.to_string(), "by\n  exact?\n  simp?\n");
+    }
+
+    /// Option+Backspace or Option+Delete over a selection deletes the
+    /// selection. Deleting the word instead left the anchor past the end of
+    /// the text, and the next delete crashed ("char range 20..21").
+    /// A `\r\n` is one line break: Backspace and Delete take it whole, Enter
+    /// adds another, and the caret always lands on a line that exists.
+    #[test]
+    fn crlf_breaks_are_edited_whole() {
+        let mut b = buf("ab\r\ncd\r\n");
+
+        b.move_to_pos(1, 0);
+
+        b.backspace();
+
+        assert_eq!(b.rope.to_string(), "abcd\r\n", "Backspace took the whole break");
+
+        assert_eq!((b.cursor_line, b.cursor_col), (0, 2));
+
+        b.delete();
+
+        assert_eq!(b.rope.to_string(), "abd\r\n", "Delete in the middle takes one char");
+
+        b.move_end();
+
+        b.delete();
+
+        assert_eq!(b.rope.to_string(), "abd", "Delete at the end took the whole break");
+
+        let mut b = buf("x\r\ny");
+
+        b.move_end();
+
+        b.insert_newline();
+
+        assert_eq!(b.rope.to_string(), "x\r\n\r\ny", "Enter in a CRLF file adds a CRLF");
+
+        assert_eq!((b.cursor_line, b.cursor_col), (1, 0));
+
+        // A lone `\r` and a typed break join into one; the caret follows the text.
+        let mut b = buf("\r");
+
+        b.move_to_char(1);
+
+        b.insert_newline();
+
+        assert!(b.cursor_line <= b.last_line(), "line {} of {}", b.cursor_line, b.last_line());
+
+        assert!(b.char_idx() <= b.rope.len_chars());
+
+        // Other breaks ropey knows end a line too: a form feed is not a column.
+        let b = buf("a\u{0C}b");
+
+        assert_eq!(b.line_len(0), 1);
+    }
+
+    /// Shift+End at the end of a line selects nothing but leaves an anchor.
+    /// An edit there must drop it, or it points past the shortened text.
+    #[test]
+    fn an_empty_selection_leaves_no_anchor_behind_an_edit() {
+        for edit in [Buffer::backspace as fn(&mut Buffer), Buffer::outdent, Buffer::delete_word_left, Buffer::toggle_comment] {
+            let mut b = buf_lang("    \nx", "Rust");
+
+            b.move_to_char(4);
+
+            b.sel(true);
+
+            b.move_end();
+
+            assert!(b.selection().is_none() && b.raw_anchor().is_some(), "Shift+End went nowhere");
+
+            edit(&mut b);
+
+            assert!(b.raw_anchor().is_none_or(|a| a <= b.rope.len_chars()), "anchor {:?} in {:?}", b.raw_anchor(), b.rope.to_string());
+
+            // Where the edit changed the text, nothing selected means nothing kept.
+            if b.rope != "    \nx" {
+                assert!(b.raw_anchor().is_none(), "kept after editing to {:?}", b.rope.to_string());
+            }
+        }
+    }
+
+    #[test]
+    fn word_deletes_take_the_selection_and_never_leave_a_stale_anchor() {
+        // From the end of `gamma` up a line: ` beta\ngamma` is selected.
+        let mut b = buf("alpha beta\ngamma");
+
+        b.move_to_char(16);
+
+        b.sel(true);
+
+        b.move_up();
+
+        assert_eq!(b.selected_text().as_deref(), Some(" beta\ngamma"));
+
+        b.delete_word_right();
+
+        assert_eq!(b.rope.to_string(), "alpha", "the selection went, not the word ahead");
+
+        assert!(b.selection().is_none());
+
+        let mut b = buf("one two three");
+
+        b.move_to_char(13);
+
+        b.sel(true);
+
+        b.move_to_char(8);
+
+        b.delete_word_left();
+
+        assert_eq!(b.rope.to_string(), "one two ", "the selection went, not the word behind");
+
+        // Even an anchor left past the text cannot reach past it.
+        b.anchor = Some(99);
+
+        assert_eq!(b.selection(), None, "anchor and caret both at the end");
+
+        b.move_to_char(4);
+
+        assert_eq!(b.selection(), Some((4, 8)));
+
+        b.backspace();
+
+        assert_eq!(b.rope.to_string(), "one ");
     }
 
     #[test]

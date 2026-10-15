@@ -198,6 +198,7 @@ pub struct App {
     /// Where the caret was drawn, to put the completion list under it.
     pub caret_cell: Option<(u16, u16)>,
 
+
     /// Several suggestions from Lean to choose between.
     pub choice: Option<Choice>,
 
@@ -4125,5 +4126,149 @@ mod tests {
         assert!(direct.lean.is_none());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A small deterministic generator, so a failing run can be replayed.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+
+            self.0 ^= self.0 >> 7;
+
+            self.0 ^= self.0 << 17;
+
+            self.0
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    /// Random keystrokes and clicks through the real input path, checking after
+    /// every one that the caret and the selection still lie inside the text,
+    /// and drawing now and then. The clipboard keys are left out so the test
+    /// cannot touch the real clipboard.
+    #[test]
+    fn random_editing_never_leaves_the_caret_outside_the_text() {
+        let starts = [
+            ("fuzz_a.lean", "theorem t : ∀ n : Nat, n = n := by\n  intro n\n  rfl"),
+            ("fuzz_b.lean", "def 𝔸 := 1\n\n-- note\n"),
+            ("fuzz_c.txt", "alpha beta\r\ngamma\r\n"),
+            ("fuzz_d.txt", ""),
+        ];
+
+        let chars = ['a', 'b', 'x', ' ', '.', '\\', '(', ')', '∀', '𝔸', ':', '-', '\''];
+
+        let seeds: u64 = std::env::var("OCODE_FUZZ_SEEDS").ok().and_then(|n| n.parse().ok()).unwrap_or(20);
+
+        for seed in 1..=seeds {
+            let (name, text) = starts[seed as usize % starts.len()];
+
+            let mut app = if name.ends_with(".lean") { lean_app(name, text) } else { app_with(name, text) };
+
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+
+            let mut log: Vec<String> = Vec::new();
+
+            screen(&mut app, 60, 8);
+
+            for step in 0..250 {
+                let nav = if cfg!(target_os = "macos") { KeyModifiers::ALT } else { KeyModifiers::CONTROL };
+
+                let key = |code: KeyCode, m: KeyModifiers| KeyEvent::new(code, m);
+
+                let action = rng.below(30);
+
+                let (x, y) = (rng.below(60) as u16, rng.below(7) as u16);
+
+                let event: Result<KeyEvent, MouseEvent> = match action {
+                    0..=7 => Ok(plain(KeyCode::Char(chars[rng.below(chars.len())]))),
+
+                    8 => Ok(plain(KeyCode::Enter)),
+
+                    9 => Ok(plain(KeyCode::Backspace)),
+
+                    10 => Ok(plain(KeyCode::Delete)),
+
+                    11 => Ok(key(KeyCode::Backspace, nav)),
+
+                    12 => Ok(key(KeyCode::Delete, nav)),
+
+                    13 => Ok(shift([KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down][rng.below(4)])),
+
+                    14 => Ok(plain([KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down][rng.below(4)])),
+
+                    15 => Ok(key([KeyCode::Left, KeyCode::Right, KeyCode::Up, KeyCode::Down][rng.below(4)], nav)),
+
+                    16 => Ok(plain([KeyCode::Home, KeyCode::End][rng.below(2)])),
+
+                    17 => Ok(ctrl(KeyCode::Char('a'))),
+
+                    18 => Ok(ctrl(KeyCode::Char('k'))),
+
+                    19 => Ok(ctrl(KeyCode::Char('/'))),
+
+                    20 => Ok(plain(KeyCode::Tab)),
+
+                    21 => Ok(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+
+                    22 => Ok(ctrl(KeyCode::Char('z'))),
+
+                    23 => Ok(ctrl(KeyCode::Char('y'))),
+
+                    24 => Ok(plain(KeyCode::Esc)),
+
+                    25 => Err(mouse(MouseEventKind::Down(MouseButton::Left), x, y)),
+
+                    26 => Err(mouse(MouseEventKind::Drag(MouseButton::Left), x, y)),
+
+                    27 => Err(shift_click(x, y)),
+
+                    28 => Ok(shift(KeyCode::End)),
+
+                    _ => Ok(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+                };
+
+                log.push(format!("{event:?}"));
+
+                match event {
+                    Ok(k) => app.on_key(k),
+
+                    Err(m) => app.on_mouse(m),
+                }
+
+                // Esc on an idle screen asks to quit; carry on regardless.
+                app.should_quit = false;
+
+                let Some(buf) = app.buffer.as_ref() else {
+                    break;
+                };
+
+                let len = buf.rope.len_chars();
+
+                let ok = buf.char_idx() <= len
+                    && buf.cursor_line <= buf.last_line()
+                    && buf.cursor_col <= buf.line_len(buf.cursor_line)
+                    && buf.raw_anchor().is_none_or(|a| a <= len);
+
+                assert!(
+                    ok,
+                    "seed {seed}, step {step}: caret {}:{} (char {}) anchor {:?} in {len} chars {:?} after:\n{}",
+                    buf.cursor_line,
+                    buf.cursor_col,
+                    buf.char_idx(),
+                    buf.raw_anchor(),
+                    buf.rope.to_string(),
+                    log.join("\n")
+                );
+
+                if step % 25 == 0 {
+                    screen(&mut app, 60, 8);
+                }
+            }
+        }
     }
 }

@@ -47,6 +47,10 @@ const SEARCH_SEED_MAX: usize = 100;
 /// Lines the editor view moves per wheel event.
 const EDITOR_SCROLL_STEP: isize = 3;
 
+/// How soon a second press must follow to make a double click: macOS's own
+/// default, since a terminal does not pass the system setting on.
+const MULTI_CLICK: Duration = Duration::from_millis(500);
+
 /// Rows the file tree scrolls per wheel event. Deliberately one: a trackpad
 /// emits a burst of events per gesture, and a bigger step makes the list bolt.
 const TREE_SCROLL_STEP: isize = 1;
@@ -198,6 +202,9 @@ pub struct App {
     /// Where the caret was drawn, to put the completion list under it.
     pub caret_cell: Option<(u16, u16)>,
 
+    /// The last press of the left button in the editor: when, on which cell,
+    /// and how many presses in a row, to tell a double or triple click.
+    last_click: Option<(Instant, (u16, u16), u8)>,
 
     /// Several suggestions from Lean to choose between.
     pub choice: Option<Choice>,
@@ -296,6 +303,7 @@ impl App {
             completion: None,
             completion_wanted: false,
             caret_cell: None,
+            last_click: None,
             choice: None,
             actions_wanted: false,
             definition_wanted: false,
@@ -701,7 +709,38 @@ impl App {
                 // existing anchor) to the click; a plain click collapses it.
                 let extend = ev.modifiers.contains(KeyModifiers::SHIFT);
 
+                let cell = (ev.column, ev.row);
+
+                // Presses on the same cell in quick succession count up:
+                // twice takes the name, three times the line, a fourth
+                // starts over.
+                let presses = match self.last_click {
+                    Some((at, last, n)) if !extend && last == cell && at.elapsed() <= MULTI_CLICK => n % 3 + 1,
+
+                    _ => 1,
+                };
+
+                self.last_click = Some((Instant::now(), cell, presses));
+
                 self.place_caret(ev.column, ev.row, extend);
+
+                if let Some(buf) = self.buffer.as_mut() {
+                    match presses {
+                        2 => {
+                            if let Some(range) = buf.word_range_at(buf.char_idx()) {
+                                buf.select_range(range);
+                            }
+                        }
+
+                        3 => {
+                            let range = buf.line_range(buf.cursor_line);
+
+                            buf.select_range(range);
+                        }
+
+                        _ => {}
+                    }
+                }
             }
 
             // Dragging with the button held sweeps a selection from the press.
@@ -4126,6 +4165,88 @@ mod tests {
         assert!(direct.lean.is_none());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn press(app: &mut App, column: u16, row: u16) {
+        app.on_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+    }
+
+    fn selected(app: &App) -> String {
+        let buf = app.buffer.as_ref().unwrap();
+
+        buf.selection().map(|(a, b)| buf.rope.slice(a..b).to_string()).unwrap_or_default()
+    }
+
+    /// Two quick presses on a name select it whole, three take the line, and
+    /// presses apart in place or time stay single clicks.
+    #[test]
+    fn double_and_triple_clicks_select_a_name_and_a_line() {
+        let mut app = app_with("multi_click", "let my_var = foo(bar_baz);\nnext line\n");
+
+        // Lay the screen out, so cells map to text. A plain-text file's gutter
+        // is three digits and a space: text column 0 is at x = 4.
+        screen(&mut app, 80, 6);
+
+        let x = |col: u16| 4 + col;
+
+        press(&mut app, x(6), 0);
+
+        assert_eq!(selected(&app), "", "one press only places the caret");
+
+        press(&mut app, x(6), 0);
+
+        assert_eq!(selected(&app), "my_var", "two take the name");
+
+        press(&mut app, x(6), 0);
+
+        assert_eq!(selected(&app), "let my_var = foo(bar_baz);\n", "three take the line");
+
+        press(&mut app, x(6), 0);
+
+        assert_eq!(selected(&app), "", "a fourth starts over");
+
+        // Two presses on different cells are two single clicks.
+        press(&mut app, x(18), 0);
+
+        press(&mut app, x(20), 0);
+
+        assert_eq!(selected(&app), "");
+
+        // A second press too long after the first is a single click.
+        press(&mut app, x(18), 0);
+
+        if let Some((at, cell, n)) = app.last_click {
+            app.last_click = Some((at - MULTI_CLICK - Duration::from_millis(1), cell, n));
+        }
+
+        press(&mut app, x(18), 0);
+
+        assert_eq!(selected(&app), "");
+
+        // The selection is a real one: typing replaces it.
+        press(&mut app, x(18), 0);
+
+        assert_eq!(selected(&app), "bar_baz");
+
+        type_keys(&mut app, "qux");
+
+        assert_eq!(text_of(&app), "let my_var = foo(qux);\nnext line\n");
+    }
+
+    /// Shift+click extends the selection and never counts as a double click.
+    #[test]
+    fn shift_clicks_do_not_count_as_a_double_click() {
+        let mut app = app_with("multi_click_shift", "alpha beta gamma\n");
+
+        screen(&mut app, 80, 4);
+
+        press(&mut app, 4, 0);
+
+        app.on_mouse(shift_click(4 + 8, 0));
+
+        app.on_mouse(shift_click(4 + 8, 0));
+
+        assert_eq!(selected(&app), "alpha be", "still a plain extension");
     }
 
     /// A small deterministic generator, so a failing run can be replayed.

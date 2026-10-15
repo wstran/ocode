@@ -115,6 +115,8 @@ afterwards so you can press again, and undo in one step.
 | Action | Effect |
 |--------|--------|
 | Click | Place the caret |
+| Double-click | Select the word: a whole name (`my_var`, `background-color` in CSS, `h'` in Lean), or a run of symbols |
+| Triple-click | Select the line |
 | Drag | Select |
 | `Shift`+click | Extend the selection from the caret to the click |
 | Wheel | Scroll the view, leaving the caret and any selection alone |

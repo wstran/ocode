@@ -1376,11 +1376,76 @@ impl Buffer {
         i
     }
 
+    /// Whether `c` can be part of a name in this buffer's language.
+    fn is_name_char(&self, c: char) -> bool {
+        is_word_char(c) || name_chars(self.hl.syntax_name()).contains(&c)
+    }
+
+    /// What a double-click at char `idx` selects: the name there, or else the
+    /// run of symbols or of spaces it is in, never across a line break. A
+    /// click past the end of a line takes what the line ends with; an empty
+    /// line has nothing to take.
+    pub fn word_range_at(&self, idx: usize) -> Option<std::ops::Range<usize>> {
+        let line = self.rope.char_to_line(idx.min(self.rope.len_chars()));
+
+        let start = self.rope.line_to_char(line);
+
+        let end = start + self.line_len(line);
+
+        if start == end {
+            return None;
+        }
+
+        let class = |c: char| {
+            if c.is_whitespace() {
+                0
+            } else if self.is_name_char(c) {
+                1
+            } else {
+                2
+            }
+        };
+
+        let at = idx.clamp(start, end - 1);
+
+        let kind = class(self.rope.char(at));
+
+        let mut from = at;
+
+        while from > start && class(self.rope.char(from - 1)) == kind {
+            from -= 1;
+        }
+
+        let mut to = at + 1;
+
+        while to < end && class(self.rope.char(to)) == kind {
+            to += 1;
+        }
+
+        Some(from..to)
+    }
+
+    /// The whole of `line` with its line break, as a triple-click takes it.
+    pub fn line_range(&self, line: usize) -> std::ops::Range<usize> {
+        let start = self.rope.line_to_char(line);
+
+        let end = if line < self.last_line() { self.rope.line_to_char(line + 1) } else { self.rope.len_chars() };
+
+        start..end
+    }
+
     /// The selection's anchor as stored, before `selection` keeps it inside
     /// the text, so a test can catch an edit that forgot to move or drop it.
     #[cfg(test)]
     pub fn raw_anchor(&self) -> Option<usize> {
         self.anchor
+    }
+
+    /// Select `range`, with the caret at its end.
+    pub fn select_range(&mut self, range: std::ops::Range<usize>) {
+        self.anchor = Some(range.start);
+
+        self.move_to_char(range.end);
     }
 
     pub fn file_name(&self) -> String {
@@ -1468,6 +1533,29 @@ fn is_line_break(c: char) -> bool {
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
+}
+
+/// Chars a language allows inside a name beyond letters, digits and `_`, so a
+/// double-click takes the whole name: `background-color` in CSS, `h'` and
+/// `get!` in Lean, `empty?` in Ruby, `string->list` in a Lisp.
+fn name_chars(syntax: &str) -> &'static [char] {
+    match syntax {
+        "Lean" => &['\'', '!', '?'],
+
+        "CSS" | "HTML" | "XML" | "YAML" | "TOML" => &['-'],
+
+        "Clojure" | "Lisp" | "Clarity" | "Pact" => &['-', '?', '!', '*', '<', '>', '='],
+
+        "Nix" => &['-', '\''],
+
+        "Haskell" => &['\''],
+
+        "Ruby" | "Elixir" => &['?', '!'],
+
+        "Julia" => &['!'],
+
+        _ => &[],
+    }
 }
 
 fn char_to_byte(s: &str, char_idx: usize) -> usize {
@@ -1863,6 +1951,57 @@ mod tests {
         b.backspace();
 
         assert_eq!(b.rope.to_string(), "one ");
+    }
+
+    /// A double-click takes a whole name, by each language's idea of one.
+    #[test]
+    fn a_double_click_takes_the_whole_name() {
+        let pick = |text: &str, syntax: &str, at: &str| -> String {
+            let b = buf_lang(text, syntax);
+
+            let idx = text.find(at).map(|byte| text[..byte].chars().count()).unwrap();
+
+            b.word_range_at(idx).map(|r| b.rope.slice(r).to_string()).unwrap_or_default()
+        };
+
+        let rust = "let my_var = foo(bar_baz);\n";
+
+        assert_eq!(pick(rust, "Rust", "var"), "my_var", "inside a name");
+
+        assert_eq!(pick(rust, "Rust", "baz"), "bar_baz");
+
+        assert_eq!(pick(rust, "Rust", "("), "(", "a symbol takes its run of symbols");
+
+        assert_eq!(pick(rust, "Rust", ");"), ");");
+
+        assert_eq!(pick("a   b\n", "Rust", "  b"), "   ", "spaces take their run");
+
+        assert_eq!(pick(".x { background-color: red; }\n", "CSS", "color"), "background-color");
+
+        assert_eq!(pick("theorem t (h' : p) : get! := by\n", "Lean", "' :"), "h'");
+
+        assert_eq!(pick("theorem t (h' : p) : get! := by\n", "Lean", "et!"), "get!");
+
+        assert_eq!(pick("exact Nat.succ_pos n\n", "Lean", "succ"), "succ_pos", "a dot ends a name part");
+
+        assert_eq!(pick("def ok? = x.empty?\n", "Ruby", "pty"), "empty?");
+
+        assert_eq!(pick("-- Toán học\n", "Lean", "án"), "Toán", "letters of any script");
+
+        assert_eq!(pick("let my-var = 1\n", "Rust", "var"), "var", "no hyphen in Rust names");
+    }
+
+    #[test]
+    fn a_double_click_stays_on_its_line() {
+        let b = buf("first\nsecond\n\nlast");
+
+        assert_eq!(b.word_range_at(5), Some(0..5), "past the end takes the last word");
+
+        assert_eq!(b.word_range_at(13), None, "an empty line has nothing to take");
+
+        assert_eq!(b.line_range(1), 6..13, "a triple-click takes the line with its break");
+
+        assert_eq!(b.line_range(3), 14..18, "the last line has no break to take");
     }
 
     #[test]
